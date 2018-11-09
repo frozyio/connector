@@ -32,7 +32,12 @@ function obtainConfig() {
       --form "key=@$FROZY_CONFIG_DIR/id_rsa.pub" \
       $curl_additionals \
       $FROZY_HTTP_ROOT/reg/v1/register)
-    if [ "$http_code" -ne 200 ]; then
+    if [ "$http_code" -eq 0 ]; then
+      cat <<EOM
+Couldn't connect to Registration API. Are you using insecure tier (sandbox)
+without FROZY_INSECURE environment variable set to "yes"?
+EOM
+    elif [ "$http_code" -ne 200 ]; then
       echo "Registration Server replied with an error $http_code: "
       cat $FROZY_CONFIG_DIR/tmp_response.txt
     fi
