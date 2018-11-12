@@ -10,7 +10,7 @@ else
   FROZY_BROKER_HOST=${FROZY_BROKER_HOST:-"broker.$FROZY_TIER.frozy.cloud"}
 fi
 
-FROZY_REGISTRATION_URL=${FROZY_REGISTRATION_URL:-"/reg/v1/register"}
+FROZY_REGISTRATION_PATH=${FROZY_REGISTRATION_PATH:-"/reg/v1/register"}
 
 FROZY_BROKER_PORT=${FROZY_BROKER_PORT:-"22"}
 FROZY_CONFIG_DIR=${FROZY_CONFIG_DIR:-"$HOME/.frozy-connector"}
@@ -27,13 +27,18 @@ function obtainConfig() {
   fi
 
   while [ "$http_code" -ne 200 ]; do
-    read -p 'Please paste a Join Token: ' join_token
+    if [ -z "$FROZY_JOIN_TOKEN" ]; then
+      read -p 'Please paste a Join Token: ' join_token
+    else
+      join_token=$FROZY_JOIN_TOKEN
+    fi
+
     http_code=$(curl -s -o "$FROZY_CONFIG_DIR/tmp_response.txt" -w '%{http_code}' \
       -v -X POST -H "Content-Type: multipart/form-data" \
       --form "token=$join_token" \
       --form "key=@$FROZY_CONFIG_DIR/id_rsa.pub" \
       $curl_additionals \
-      "${FROZY_REGISTRATION_HTTP_ROOT}${FROZY_REGISTRATION_URL}")
+      "${FROZY_REGISTRATION_HTTP_ROOT}${FROZY_REGISTRATION_PATH}")
     if [ "$http_code" -eq 0 ]; then
       cat <<EOM
 Couldn't connect to Registration API. Are you using insecure tier (sandbox)
@@ -42,6 +47,11 @@ EOM
     elif [ "$http_code" -ne 200 ]; then
       echo "Registration Server replied with an error $http_code: "
       cat $FROZY_CONFIG_DIR/tmp_response.txt
+
+      if [ ! -z "$FROZY_JOIN_TOKEN" ]; then
+        echo "Key registration failed. Retrying in 30 seconds."
+        sleep 30
+      fi
     fi
   done
 
