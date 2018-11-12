@@ -1,14 +1,16 @@
 #!/bin/bash
 
-FROZY_HTTP_SCHEMA=${FROZY_HTTP_SCHEMA:-"https"}
+FROZY_REGISTRATION_HTTP_SCHEMA=${FROZY_REGISTRATION_HTTP_SCHEMA:-"https"}
 
 if [ -z "$FROZY_TIER" ]; then
-  FROZY_HTTP_ROOT=${FROZY_HTTP_ROOT:-"$FROZY_HTTP_SCHEMA://frozy.cloud"}
+  FROZY_REGISTRATION_HTTP_ROOT=${FROZY_REGISTRATION_HTTP_ROOT:-"$FROZY_REGISTRATION_HTTP_SCHEMA://frozy.cloud"}
   FROZY_BROKER_HOST=${FROZY_BROKER_HOST:-"broker.frozy.cloud"}
 else
-  FROZY_HTTP_ROOT=${FROZY_HTTP_ROOT:-"$FROZY_HTTP_SCHEMA://$FROZY_TIER.frozy.cloud"}
+  FROZY_REGISTRATION_HTTP_ROOT=${FROZY_REGISTRATION_HTTP_ROOT:-"$FROZY_REGISTRATION_HTTP_SCHEMA://$FROZY_TIER.frozy.cloud"}
   FROZY_BROKER_HOST=${FROZY_BROKER_HOST:-"broker.$FROZY_TIER.frozy.cloud"}
 fi
+
+FROZY_REGISTRATION_URL=${FROZY_REGISTRATION_URL:-"/reg/v1/register"}
 
 FROZY_BROKER_PORT=${FROZY_BROKER_PORT:-"22"}
 FROZY_CONFIG_DIR=${FROZY_CONFIG_DIR:-"$HOME/.frozy-connector"}
@@ -27,11 +29,11 @@ function obtainConfig() {
   while [ "$http_code" -ne 200 ]; do
     read -p 'Please paste a Join Token: ' join_token
     http_code=$(curl -s -o "$FROZY_CONFIG_DIR/tmp_response.txt" -w '%{http_code}' \
-      -X POST -H "Content-Type: multipart/form-data" \
+      -v -X POST -H "Content-Type: multipart/form-data" \
       --form "token=$join_token" \
       --form "key=@$FROZY_CONFIG_DIR/id_rsa.pub" \
       $curl_additionals \
-      $FROZY_HTTP_ROOT/reg/v1/register)
+      "${FROZY_REGISTRATION_HTTP_ROOT}${FROZY_REGISTRATION_URL}")
     if [ "$http_code" -eq 0 ]; then
       cat <<EOM
 Couldn't connect to Registration API. Are you using insecure tier (sandbox)

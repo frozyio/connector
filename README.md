@@ -36,6 +36,13 @@ docker build -t frozy/connector .
 
 To use without Docker against a sandbox tier:
 
-FROZY_TIER=sandbox FROZY_INSECURE=yes ./connector.sh
+        FROZY_TIER=sandbox FROZY_INSECURE=yes ./connector.sh
 
 Optionally prepend FROZY_CONFIG_DIR to specify directory to store configs
+
+# Use for Frozy development
+
+To use against local deployment of Frozy first source connector environment
+script:
+
+        source _devops/_local/scripts/connector_env.sh
