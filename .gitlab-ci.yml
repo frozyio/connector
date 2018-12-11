@@ -3,10 +3,13 @@ image: docker:latest
 services:
   - docker:dind
 
+before_script:
+  - apk update && apk add make
+
 build-validate:
   stage: build
   script:
-    - docker build --pull -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG" .
+    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" REGISTRY_IMAGE_TAG="$CI_REGISTRY_IMAGE_TAG" image
   except:
     - /^release\/.*$/
 
@@ -15,7 +18,7 @@ build-push:
   script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
     - RELEASE=$(echo $CI_COMMIT_REF_NAME | sed "s:release/::g")
-    - docker build --pull -t "$CI_REGISTRY_IMAGE:$RELEASE" .
+    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" REGISTRY_IMAGE_TAG="$RELEASE" image
     - docker push "$CI_REGISTRY_IMAGE:$RELEASE"
   only:
     - /^release\/.*$/

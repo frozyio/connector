@@ -59,7 +59,7 @@ Available environment variables are:
 
     Default (if ```FROZY_TIER``` is not set): ```frozy.cloud```
 
-  * ```FROZY_REGISTRATION_URL``` - Path to ```register``` method of Registration
+  * ```FROZY_REGISTRATION_HTTP_URL``` - Path to ```register``` method of Registration
     API under ```$FROZY_REGISTRATION_HTTP_ROOT```
 
     Default: ```/reg/v1/register```
@@ -83,13 +83,6 @@ Available environment variables are:
 
 To use without Docker against a sandbox tier:
 
-        FROZY_TIER=sandbox FROZY_INSECURE=yes ./connector.sh
+        FROZY_TIER=sandbox FROZY_INSECURE=yes ./connector
 
 Optionally prepend FROZY_CONFIG_DIR to specify directory to store configs
-
-# Use for Frozy development
-
-To use against local deployment of Frozy first source connector environment
-script (please be aware):
-
-        source _devops/_local/scripts/connector_env.sh
