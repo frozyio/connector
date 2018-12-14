@@ -25,6 +25,11 @@ auto_registration:
   consumer:
     port: 4321
 
-# Config: validation
-# join xor register
-# if register -> register.provider xor register.consumer
+# Config validation
+
+# Either join or auto_registration sections exist. If there are both or none
+# then configuration is considered invalid.
+
+# If auto_registration section exists then either auto_registration.provider
+# or auto_registration.consumer section must exists. If there are both or none
+# then configuration is considered invalid.

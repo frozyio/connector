@@ -33,48 +33,53 @@ can be replaced/set by a corresponding [environment variable](#environment-varia
 if one exists. See descriptions below.
 
 When connector starts it checks if connector registration reply cache exsits in
-```$FROZY_CONFIG_DIR/config``` . If yes, then it immediately connects to the broker.
-Else it read `.yaml` configuration and if `join` section exists then it perform
-registration action, dump reply cache and then connect to broker with obtained connector values.
+```$FROZY_CONFIG_DIR/config``` . If yes, then it immediately connects to broker
+and resumes what it done previously. Otherwise it checks ```join``` and
+```auto_registration``` sections of YAML configuration.
 
-In other case if `auto_registration` section contains exists it registers a
-resource and obtains join token, register it and connect to broker.
+If `join` section exists then it performs key registration action, receives
+configuration and connects to broker with obtained configuration values.
 
-And finally if registration reply cache not exists, `join` and `auto_registration` sections
-not provided then it ask join token from stdin, register in and connect to the broker.
+In other case if `auto_registration` section exists connector registers a
+resource, obtains join token, proceeds with key registration, and connects to
+broker.
 
-So minimal configuration file for use access token to register new resource and make provider
+Finally if registration reply cache doesn't exist and neither `join` nor
+`auto_registration` sections are specified in YAML configuration then connector
+interactively asks for join token from stdin.
+
+Minimal configuration file for use access token to register new resource and make provider
 could be like that:
 
-auto_registration:
-  access_token: qwerty12345
-  resource: ResourceName
-  provider:
-    host: localhost
-    port: 1234
+        auto_registration:
+          access_token: qwerty12345
+          resource: ResourceName
+          provider:
+            host: localhost
+            port: 1234
 
-Configuration file could be accepted by command line args:
+Configuration file path could be specified via command line argument:
 
-    ./connector --config /path/to/connector.yaml
+        ./connector --config /path/to/connector.yaml
 
-In such case configuration will be read from the specified file, processed and write to
-the default location.
+In such case configuration will be read from the specified file, processed and
+written to the default location.
 
 # Environment variables
 
 Connector behavior can be tuned by adjusting environment variables. For
-docker-based scenarios you do this by using ```--env``` argument for ```docker run```.
-Like this:
+docker-based scenarios you do this by using ```--env``` argument for
+```docker run```. Like this:
 
         docker run -it --rm --net=host --env FROZY_TIER=sandbox --env FROZY_INSECURE=yes frozy/connector
 
-Or using access token to register and run new provider:
+Or if you'd like to use access token to register and run new provider:
 
         docker run -it --rm --net=host --env FROZY_TIER=sandbox --env FROZY_ACCESS_TOKEN=<access-token> --env FROZY_RESOURCE_NAME=Cat --env FROZY_PROVIDER_HOST=localhost --env FROZY_PROVIDER_PORT=4444 frozy/connector
 
-Or using configuration file:
+Or if using configuration file:
 
-        docker run -it --rm --net=host --mount type=bind,source=/dir/with/config,target=/tmp frozy/connector --config /tmp/connector.yaml
+        docker run -it --rm --net=host --mount type=bind,source=/dir/with/config,target=/etc/frozy-connector frozy/connector --config /etc/frozy-connector/connector.yaml
 
 Available environment (configuration) variables are:
   * ```FROZY_TIER``` (```frozy.tier```) - tier (sandbox/demo/pilot/staging) of Frozy that is used.
@@ -124,34 +129,41 @@ Available environment (configuration) variables are:
     Default: none (user is prompted for Join Token at the console)
 
 Additional environment (configuration) variables for using access token API:
-  * ```FROZY_RESOURCE_NAME``` (```auto_registration.resource```) - Name of the resource to register (mostly for
-    automated connector deployment scenarios). Used without ```$FROZY_JOIN_TOKEN``
-    and with ```$FROZY_ACCESS_TOKEN``` for automatically create and register join token.
 
-  * ```FROZY_ACCESS_TOKEN``` (```auto_registration.access_token```) - Access token to use for backend authentication.
+  * ```FROZY_RESOURCE_NAME``` (```auto_registration.resource```) - Name of the
+    resource to register (mostly for automated connector deployment scenarios).
+    Used without ```$FROZY_JOIN_TOKEN``` and with ```$FROZY_ACCESS_TOKEN``` to
+    automatically create and register join token.
 
-  * ```FROZY_CONSUMER_PORT``` (```auto_registration.conumer.port```) - If set then Consumer Join Token would be created
-         (value of this variable would be used as a consumer port)
+  * ```FROZY_ACCESS_TOKEN``` (```auto_registration.access_token```) - Access
+    token to use for backend authentication.
 
-  * ```FROZY_PROVIDER_HOST``` (```auto_registration.provider.host```) - If set then Provider Join Token would be created
-         (value of this variable would be used as a provider host)
+  * ```FROZY_CONSUMER_PORT``` (```auto_registration.consumer.port```) - If set
+    then Consumer Join Token would be created (value of this variable would be
+    used as a consumer port)
 
-  * ```FROZY_PROVIDER_PORT```  (```auto_registration.provider.port```) - If set then Provider Join Token would be created
-         (value of this variable would be used as a provider port)
+  * ```FROZY_PROVIDER_HOST``` (```auto_registration.provider.host```) - If set
+    then Provider Join Token would be created (value of this variable would be
+    used as a provider host)
 
-  * ```FROZY_BACKEND_URL```  (```frozy.api.http_root```) - URL for accessing backend. If this is set then
-         FROZY_TIER is ignored.
+  * ```FROZY_PROVIDER_PORT```  (```auto_registration.provider.port```) - If set
+    then Provider Join Token would be created (value of this variable would be
+    used as a provider port).
+
+  * ```FROZY_BACKEND_URL```  (```frozy.api.http_root```) - URL for accessing
+    backend. If this is set then ```FROZY_TIER``` is ignored.
 
     Default (if ```FROZY_TIER``` is set): ```$FROZY_TIER.frozy.cloud```
 
     Default (if ```FROZY_TIER``` is not set): ```frozy.cloud```
 
-  * ```FROZY_FAIL_IF_EXISTS```  (```frozy.api.fail_if_exists```) - If set to anything then registration process
-         will fail when resource with FROZY_RESOURCE_NAME already exists
+  * ```FROZY_FAIL_IF_EXISTS```  (```auto_registration.fail_if_exists```) - If
+    set to anything then registration process will fail when resource with
+    ```FROZY_RESOURCE_NAME``` already exists.
 
 # Build
 
-        docker build -t frozy/connector .
+        make image
 
 # Use without Docker
 
