@@ -7,10 +7,11 @@ import (
 	"net"
 	"time"
 
+	"gitlab.com/frozy.io/connector/config"
 	"golang.org/x/crypto/ssh"
 )
 
-func listener(resource Endpoint, broker Endpoint, sshConfig *ssh.ClientConfig) (net.Listener, error) {
+func listener(resource config.Endpoint, broker config.Endpoint, sshConfig *ssh.ClientConfig) (net.Listener, error) {
 	dialer := net.Dialer{
 		Timeout:   60 * time.Second,
 		KeepAlive: 15 * time.Second,
@@ -46,7 +47,7 @@ func listener(resource Endpoint, broker Endpoint, sshConfig *ssh.ClientConfig) (
 }
 
 type frozyListener struct {
-	addr Endpoint
+	addr config.Endpoint
 	conn *client
 	in   <-chan forward
 }

@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.11 AS build-env
+FROM golang:1.11.3 AS build-env
 WORKDIR /go/src/gitlab.com/frozy.io
 ADD . connector/
 WORKDIR connector
