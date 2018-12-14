@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 
+	"gitlab.com/frozy.io/connector/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -65,7 +66,7 @@ func (c *client) handleGlobalRequests(incoming <-chan *ssh.Request) {
 	}
 }
 
-func (c *client) registerForward(addr Endpoint) chan forward {
+func (c *client) registerForward(addr config.Endpoint) chan forward {
 	c.fwd = forwardChan{
 		laddr:   addr,
 		channel: make(chan forward, 1),
@@ -115,8 +116,8 @@ func (c *client) handleChannels(in <-chan ssh.NewChannel) {
 				continue
 			}
 
-			laddr = Endpoint{payload.Addr, uint16(payload.Port)}
-			raddr = Endpoint{payload.OriginAddr, uint16(payload.OriginPort)}
+			laddr = config.Endpoint{payload.Addr, uint16(payload.Port)}
+			raddr = config.Endpoint{payload.OriginAddr, uint16(payload.OriginPort)}
 		default:
 			panic(fmt.Errorf("ssh: unknown channel type %s", channelType))
 		}

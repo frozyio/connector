@@ -1,0 +1,30 @@
+frozy:
+  tier: sandbox
+  http_schema: https
+  insecure: true
+  broker:
+    host: custom.frozy.broker
+    port: 2200
+  registration:
+    http_root: http://custom.reg.cloud
+    http_path: /reg/v1/register
+  api:
+    http_root: http://custom.api.cloud
+    http_path: /api/v1
+
+join:
+  token: JAbdnbtNXsf3CRk9FFP93Ndhjwurwr23RESNMje7crQXM
+
+auto_registration:
+  access_token: A2vHcq3oahZkwporuJXTJkCPJrHbiCuLWhQcHsDnAmfTf
+  resource: ResourceName
+  fail_if_exists: true
+  provider:
+    host: localhost
+    port: 1234
+  consumer:
+    port: 4321
+
+# Config: validation
+# join xor register
+# if register -> register.provider xor register.consumer
