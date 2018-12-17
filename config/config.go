@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"time"
 
 	"github.com/spf13/viper"
 	ini "gopkg.in/ini.v1"
@@ -20,6 +21,9 @@ const defaultHTTPSchema = "https"
 const defaultDomain = "frozy.cloud"
 const defaultRegPath = "/reg/v1/register"
 const defaultAPIPath = "/api/v1"
+
+// ReconnectTimeout is a timeout for reconnect to ssh server
+const ReconnectTimeout = 15 * time.Second
 
 // Role is for connector
 type Role string
