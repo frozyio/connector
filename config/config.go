@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"os/user"
 	"path"
@@ -176,17 +177,33 @@ func (c FrozyConfig) tier() string {
 }
 
 func (c FrozyConfig) buildURL(root, path, defaultPath string) string {
-	if root == "" {
-		schema := c.HTTPSchema
-		if schema == "" {
-			schema = defaultHTTPSchema
+	empty := url.URL{}
+	url, err := url.Parse(root)
+	if err != nil {
+		fmt.Printf("Failed to parse root url '%s': %s\n", root, err.Error())
+		url = &empty
+	} else if url.Scheme == "" && url.Host == "" && url.Path != "" {
+		url.Host = url.Path
+		url.Path = ""
+	}
+
+	if url.Scheme == "" {
+		if c.HTTPSchema == "" {
+			url.Scheme = defaultHTTPSchema
+		} else {
+			url.Scheme = c.HTTPSchema
 		}
-		root = fmt.Sprintf("%s://%s%s", schema, c.tier(), defaultDomain)
+	}
+	if url.Host == "" {
+		url.Host = c.tier() + defaultDomain
 	}
 	if path == "" {
-		path = defaultPath
+		url.Path = defaultPath
+	} else {
+		url.Path = path
 	}
-	return root + path
+
+	return url.String()
 }
 
 func (c Config) filepath() string {
