@@ -78,8 +78,6 @@ func (l *frozyListener) Close() error {
 		uint32(l.addr.Port),
 	}
 
-	close(l.conn.fwd.channel)
-
 	ok, _, err := l.conn.SendRequest("cancel-tcpip-forward", true, ssh.Marshal(&m))
 	if err == nil && !ok {
 		err = errors.New("ssh: cancel-tcpip-forward failed")

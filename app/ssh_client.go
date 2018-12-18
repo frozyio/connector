@@ -52,6 +52,7 @@ func newClient(c ssh.Conn, chans <-chan ssh.NewChannel, reqs <-chan *ssh.Request
 	go conn.handleChannels(conn.HandleChannelOpen("forwarded-tcpip"))
 	go func() {
 		conn.Wait()
+		fmt.Println("SSH connection closed")
 		close(conn.fwd.channel)
 	}()
 
@@ -116,14 +117,11 @@ func (c *client) handleChannels(in <-chan ssh.NewChannel) {
 				continue
 			}
 
-			laddr = config.Endpoint{payload.Addr, uint16(payload.Port)}
-			raddr = config.Endpoint{payload.OriginAddr, uint16(payload.OriginPort)}
+			laddr = config.Endpoint{Host: payload.Addr, Port: uint16(payload.Port)}
+			raddr = config.Endpoint{Host: payload.OriginAddr, Port: uint16(payload.OriginPort)}
+			c.forward(laddr, raddr, ch)
 		default:
-			panic(fmt.Errorf("ssh: unknown channel type %s", channelType))
-		}
-		if ok := c.forward(laddr, raddr, ch); !ok {
-			// Section 7.2, implementations MUST reject spurious incoming
-			// connections.
+			fmt.Printf("ssh: unknown channel type %s", channelType)
 			ch.Reject(ssh.Prohibited, "no forward for address")
 			continue
 		}

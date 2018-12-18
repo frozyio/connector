@@ -72,7 +72,8 @@ func (c *Connector) runProvider() error {
 		listener, err := listener(c.Config.Connect.RemoteResourse(), c.Config.Frozy.BrokerAddr(), sshConfig)
 		if err != nil {
 			fmt.Printf("Remote SSH listen error: %s\n", err.Error())
-			return err
+			time.Sleep(config.ReconnectTimeout)
+			continue
 		}
 		defer listener.Close()
 
