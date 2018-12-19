@@ -4,13 +4,48 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"gitlab.com/frozy.io/connector/config"
+	ssh_custom "gitlab.com/frozy.io/connector/ssh"
 	"golang.org/x/crypto/ssh"
 )
 
+type brokerClient struct {
+	*ssh.Client
+	cfg   *ssh.ClientConfig
+	addr  config.Endpoint
+	mutex *sync.Mutex
+}
+
+func (c *brokerClient) keepConnected() {
+	for {
+		var err error
+		fmt.Println("SSH connecting to broker at", c.addr.String())
+		c.mutex.Lock()
+		c.Client, err = ssh.Dial("tcp", c.addr.String(), c.cfg)
+		c.mutex.Unlock()
+		if err != nil {
+			fmt.Printf("SSH server dial error: %s\n", err)
+		} else {
+			fmt.Println("SSH connected to broker")
+			err = c.Wait()
+			fmt.Printf("SSH connection finished with: %s\n", err)
+		}
+		time.Sleep(config.ReconnectTimeout)
+	}
+}
+
 func (c *Connector) runConsumer() error {
+	sshConfig, err := c.sshClientConfig()
+	if err != nil {
+		return err
+	}
+
+	broker := brokerClient{cfg: sshConfig, addr: c.Config.Frozy.BrokerAddr(), mutex: &sync.Mutex{}}
+	go broker.keepConnected()
+
 	listener, err := net.Listen("tcp", c.Config.Connect.Addr.String())
 	if err != nil {
 		fmt.Printf("Local listen at %s error %s\n", c.Config.Connect.Addr.String(), err.Error())
@@ -18,47 +53,28 @@ func (c *Connector) runConsumer() error {
 	}
 	defer listener.Close()
 
+	fmt.Printf("Listening at %s to consume resource %s\n",
+		c.Config.Connect.Addr.String(), c.Config.Connect.RemoteResourse().String())
+
 	for {
-		if sshClient, err := c.connectConsumerToBroker(); err == nil {
-			defer sshClient.Close()
-
-			fmt.Printf("Listening at %s to consume resource %s\n",
-				c.Config.Connect.Addr.String(), c.Config.Connect.RemoteResourse().String())
-
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					fmt.Printf("Local accept error %s\n", err.Error())
-					return err
-				}
-
-				if remoteConn, err := sshClient.Dial("tcp", c.Config.Connect.RemoteResourse().String()); err != nil {
-					fmt.Printf("SSH remote dial error: %s\n", err)
-					conn.Close()
-					break
-				} else {
-					go connectionForward(remoteConn, conn)
-				}
-			}
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Printf("Local accept error %s\n", err.Error())
+			return err
 		}
 
-		time.Sleep(config.ReconnectTimeout)
+		broker.mutex.Lock()
+		if broker.Client == nil {
+			fmt.Println("SSH connection not ready")
+			conn.Close()
+		} else if remote, err := broker.Dial("tcp", c.Config.Connect.RemoteResourse().String()); err != nil {
+			fmt.Printf("SSH remote dial error: %s\n", err)
+			conn.Close()
+		} else {
+			go connectionForward(remote, conn)
+		}
+		broker.mutex.Unlock()
 	}
-}
-
-func (c *Connector) connectConsumerToBroker() (*ssh.Client, error) {
-	config, err := c.sshClientConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Println("Connecting to broker at", c.Config.Frozy.BrokerAddr().String())
-	client, err := ssh.Dial("tcp", c.Config.Frozy.BrokerAddr().String(), config)
-	if err != nil {
-		fmt.Printf("SSH server dial error: %s\n", err)
-		return nil, err
-	}
-	return client, nil
 }
 
 func (c *Connector) runProvider() error {
@@ -69,7 +85,15 @@ func (c *Connector) runProvider() error {
 
 	for {
 		fmt.Println("Connecting to broker at", c.Config.Frozy.BrokerAddr().String())
-		listener, err := listener(c.Config.Connect.RemoteResourse(), c.Config.Frozy.BrokerAddr(), sshConfig)
+		// listener, err := listener(c.Config.Connect.RemoteResourse(), c.Config.Frozy.BrokerAddr(), sshConfig)
+		sshClient, err := ssh_custom.Dial(c.Config.Frozy.BrokerAddr().String(), sshConfig)
+		if err != nil {
+			fmt.Printf("SSH server dial error: %s\n", err)
+			time.Sleep(config.ReconnectTimeout)
+			continue
+		}
+
+		listener, err := sshClient.ListenTCPUnresolve(c.Config.Connect.RemoteResourse())
 		if err != nil {
 			fmt.Printf("Remote SSH listen error: %s\n", err.Error())
 			time.Sleep(config.ReconnectTimeout)
@@ -99,19 +123,30 @@ func (c *Connector) runProvider() error {
 	}
 }
 
-func connectionForward(remoteConn net.Conn, targetConn net.Conn) {
-	defer remoteConn.Close()
-	defer targetConn.Close()
+func connectionForward(remote net.Conn, target net.Conn) {
+	doneR2T := make(chan error)
+	doneT2R := make(chan error)
 
-	copyConn := func(writer io.Writer, reader io.Reader) {
-		_, err := io.Copy(writer, reader)
-		if err != nil {
-			fmt.Printf("Connection forwarding finished with: %s\n", err.Error())
-		}
+	go func() {
+		_, err := io.Copy(remote, target)
+		doneT2R <- err
+	}()
+
+	go func() {
+		_, err := io.Copy(target, remote)
+		doneR2T <- err
+	}()
+
+	select {
+	case <-doneR2T:
+		target.Close()
+		remote.Close()
+		<-doneT2R
+	case <-doneT2R:
+		target.Close()
+		remote.Close()
+		<-doneR2T
 	}
-
-	go copyConn(targetConn, remoteConn)
-	copyConn(remoteConn, targetConn)
 }
 
 func (c Connector) sshClientConfig() (*ssh.ClientConfig, error) {
