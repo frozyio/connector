@@ -34,36 +34,38 @@ if one exists. See descriptions below.
 
 When connector starts it checks if connector registration reply cache exsits in
 ```$FROZY_CONFIG_DIR/config``` . If yes, then it immediately connects to broker
-and resumes what it done previously. Otherwise it checks ```join``` and
-```auto_registration``` sections of YAML configuration.
+and resumes what it done previously. Otherwise it checks ```auto_registration``` 
+section of YAML configuration.
 
-If `join` section exists then it performs key registration action, receives
-configuration and connects to broker with obtained configuration values.
-
-In other case if `auto_registration` section exists connector registers a
-resource, obtains join token, proceeds with key registration, and connects to
-broker.
-
-Finally if registration reply cache doesn't exist and neither `join` nor
-`auto_registration` sections are specified in YAML configuration then connector
-interactively asks for join token from stdin.
+If `access_token` section exists then it performs key registration action and 
+connects to broker.
 
 Minimal configuration file for use access token to register new resource and make provider
 could be like that:
 
         auto_registration:
-          access_token: qwerty12345
-          resource: ResourceName
-          provider:
-            host: localhost
-            port: 1234
+          access_token: "qwerty12345"
+          
+        applications-config:
+          applications:
+            - name: "sql"
+              access_token: "ABVdVrRy3ZC5Q8vfLvLQRHXwec1J"
+		      host: "localhost"
+              port: 5444
+              
+              AND/OR
+              
+          intents:
+            - src_name: "web-backend"
+			  dst_name: "sql-backend.self.user-domain.username-afrozy-dio"
+			  access_token: "ABVdVrRy3ZC5Q8vfLvLQRHXwec1J"
+			  port: 5555  
 
 Configuration file path could be specified via command line argument:
 
         ./connector --config /path/to/connector.yaml
 
-In such case configuration will be read from the specified file, processed and
-written to the default location.
+In such case configuration will be read from the specified file.
 
 # Environment variables
 
@@ -73,9 +75,9 @@ docker-based scenarios you do this by using ```--env``` argument for
 
         docker run -it --rm --net=host --env FROZY_TIER=sandbox --env FROZY_INSECURE=yes frozy/connector
 
-Or if you'd like to use access token to register and run new provider:
+Or if you'd like to use access token to register and run new application provider:	
 
-        docker run -it --rm --net=host --env FROZY_TIER=sandbox --env FROZY_ACCESS_TOKEN=<access-token> --env FROZY_RESOURCE_NAME=Cat --env FROZY_PROVIDER_HOST=localhost --env FROZY_PROVIDER_PORT=4444 frozy/connector
+        docker run -it --rm --net=host --env FROZY_TIER=sandbox --env FROZY_ACCESS_TOKEN=<access-token> --env FROZY_APPLICATIONS='[{ "name": "sql_test", "access_token": "ABVdVrRy3ZC5", "host": "localhost", "port": 5544}]' frozy/connector
 
 Or if using configuration file:
 
@@ -99,7 +101,7 @@ Available environment (configuration) variables are:
 
   * ```FROZY_BROKER_PORT``` (```frozy.broker.port```) - Broker TCP port number
 
-    Default: 22
+    Default: 2200
 
   * ```FROZY_REGISTRATION_HTTP_SCHEMA``` (```frozy.http_schema```) - URL schema (http/https) that would be
     used be used to access Registration API Server.
@@ -122,45 +124,63 @@ Available environment (configuration) variables are:
 
     Default: ```$HOME/.frozy-connector```
 
-  * ```FROZY_JOIN_TOKEN``` (```join.token```) - Join token value to use (mostly for automated
-    connector deployment scenarios). If this is specified, Connector wouldn't
-    prompt user for Join Token, but will instead use this value.
-
-    Default: none (user is prompted for Join Token at the console)
-
-Additional environment (configuration) variables for using access token API:
-
-  * ```FROZY_RESOURCE_NAME``` (```auto_registration.resource```) - Name of the
-    resource to register (mostly for automated connector deployment scenarios).
-    Used without ```$FROZY_JOIN_TOKEN``` and with ```$FROZY_ACCESS_TOKEN``` to
-    automatically create and register join token.
-
   * ```FROZY_ACCESS_TOKEN``` (```auto_registration.access_token```) - Access
-    token to use for backend authentication.
+    token to use for registration API authentication.
 
-  * ```FROZY_CONSUMER_PORT``` (```auto_registration.consumer.port```) - If set
-    then Consumer Join Token would be created (value of this variable would be
-    used as a consumer port)
+    Default: none (user must point access_token for key registration process)
 
-  * ```FROZY_PROVIDER_HOST``` (```auto_registration.provider.host```) - If set
-    then Provider Join Token would be created (value of this variable would be
-    used as a provider host)
+Additional environment (configuration) variables for provide/consume applications:
 
-  * ```FROZY_PROVIDER_PORT```  (```auto_registration.provider.port```) - If set
-    then Provider Join Token would be created (value of this variable would be
-    used as a provider port).
+  * ```FROZY_APPLICATIONS``` (```applications-config.applications```) - JSON object with provided applications information
+  
+    Default: none (primary way to configure provided applications is via configuration file)
+    
+    Example: 
+		[
+		   {
+			  "name": "sql_test",
+			  "access_token": "ABVdVrRy3ZC5Q8b3X1K3Nsehf7",
+			  "host": "localhost",
+			  "port": 5544
+		   }
+		]
+		where:
+		<name> - application name in domain-name form (<app_name>[.<domain>]*, if <domain> is used in application naming scheme then user`s e-mail 
+				 or special reserved word <self> must pointed at the end of name). 
+				 Examples: "sql", "sql.user-domain.self", "sql.user-domain.user-amail-dcom". In last example, for e-mail address string a special coding scheme is used.
+		<access_token> - user`s access_token that granted with rights to provide pointed application
+		<host> - IP address or domain name of provided application
+		<port> - port number of provided application
+    
+  * ```FROZY_INTENTS``` (```applications-config.intents```) - JSON object with consumed applications information
+  
+    Default: none (primary way to configure consumed applications is via configuration file)
+    
+    Example:
+		[
+		   {
+			  "src_name": "sql_test_src",
+			  "dst_name": "sql_test",
+			  "access_token": "ABVdVrRy3ZC5Q",      
+			  "port": 50544
+		   },
+		   {
+			  "src_name": "backend_test_src",
+			  "dst_name": "backend_test",
+			  "access_token": "ABVdVrRy3ZC5QJ",
+			  "port": 51644
+		   }
+		]
+		where:
+		<src_name> - source application name in domain-name form that will consume provided application pointed as <dst_name>
+		<dst_name> - destination application name in domain-name form that will be consumed by application with <src_name>
+					NOTE: application naming scheme same as for PROVIDED application <name> field
+		<access_token> - user`s access_token that granted with rights to consume provided application
+		<port> - port number where connector will be listen for consumed application
+    
+  NOTE: The connector can be used for providing of applications and their consumption in same time, so both sections of the configuration can be filled
 
-  * ```FROZY_BACKEND_URL```  (```frozy.api.http_root```) - URL for accessing
-    backend. If this is set then ```FROZY_TIER``` is ignored.
-
-    Default (if ```FROZY_TIER``` is set): ```$FROZY_TIER.frozy.cloud```
-
-    Default (if ```FROZY_TIER``` is not set): ```frozy.cloud```
-
-  * ```FROZY_FAIL_IF_EXISTS```  (```auto_registration.fail_if_exists```) - If
-    set to anything then registration process will fail when resource with
-    ```FROZY_RESOURCE_NAME``` already exists.
-
+    
 # Build
 
         make image

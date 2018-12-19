@@ -30,4 +30,7 @@ clean:
 	rm -rf bin/ dist/
 
 image:
-	docker build --pull --build-arg VERSION=${VERSION} -t ${REGISTRY_IMAGE}:${VERSION} .
+	docker build --pull \
+		--build-arg VERSION=${VERSION} \
+		--build-arg GOPROXY=${GOPROXY} \
+		-t ${REGISTRY_IMAGE}:${VERSION} .

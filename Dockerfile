@@ -1,11 +1,14 @@
 # build stage
-FROM golang:1.11.4 AS build-env
+FROM golang:1.12beta2 AS build-env
+ENV GO111MODULE=on
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/gitlab.com/frozy.io
 ADD . connector/
 WORKDIR connector
 ARG VERSION
 RUN make deps
-RUN VERSION=$VERSION make build 
+RUN VERSION=$VERSION make build
 
 # Broker itself
 FROM alpine:3.8

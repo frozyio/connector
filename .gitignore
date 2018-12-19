@@ -1,4 +1,8 @@
-connector
-connector.yaml
+/connector
+/connector.yaml
+.project
+.cproject
+.settings
 bin/*
 dist/*
+
