@@ -4,7 +4,7 @@ services:
   - docker:dind
 
 before_script:
-  - apk update && apk add make
+  - apk update && apk add make git
 
 build-validate:
   stage: build
@@ -17,9 +17,9 @@ build-push:
   stage: build
   script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-    - RELEASE=$(echo $CI_COMMIT_REF_NAME | sed "s:release/::g")
-    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" REGISTRY_IMAGE_TAG="$RELEASE" image
-    - docker push "$CI_REGISTRY_IMAGE:$RELEASE"
+    - VERSION=$(echo $CI_COMMIT_REF_NAME | sed "s:release/::g")
+    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" image
+    - docker push "$CI_REGISTRY_IMAGE:$VERSION"
   only:
     - /^release\/.*$/
   except:

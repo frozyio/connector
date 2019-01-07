@@ -1,0 +1,16 @@
+language: go
+go:
+- 1.11.4
+addons:
+  apt:
+    packages:
+    - zip
+deploy:
+  provider: releases
+  file_glob: true
+  file: dist/*
+  skip_cleanup: true
+  on:
+    tags: true
+  api_key:
+    secure: fuOkjLv4xe/PLV8JFy2xAz2I91h1WTAkXYdb7p+UBWpGsbyI1HygFjUmvczaR1WGUzTmPc5g1emCC14MTi+riaKtUXNIx2Fbw5wE6fkwPrU/0cL0To3cqnBBhFgtKwstnpONOBz6U5W3FGcsDLkD2a9JCidz8Y8cN9nuGReOSGNwsN1qcpXtelHNWrrNnhqhifoJwmnBfChrWPINNlC9eQ5+kWTV4/kwk/akAzOLenagqzZhmCjrNgyMmbr42EzrxU1+16V2EfSln+kSH/vEANZFWdFVyBrd6oIGRxDffk877szR4tY8furjenJYu6WH/DQYuFkX565hhOmj4sIiZPW+cu2Km0auM61LDf2lscihTX11VRRHNYIT+Id4ZRuYNxV2nb7ieV8BLS+nN4t89USMk8M2yJWsfl8QULtcMaub/PFn9sSC2ToJeeamw/0mad/MnZkd/a4mqcGzxdq/+u5VYsw3IRpp3mJ4YOiytWmMyRBZKLBsaMo35w7aC73N49hzdaols7VV8NdQImnniGpuzQgSWwR6MtnR2KQ60w0rNTpBKfiu7IMtcfA/OIPaEZPmr0KHlEDA1qQ7HWTrCNki66uojdomp+zyk2Pw7CQGllidZ0Yy3j1siD9ZLspCroHYRee3Qf+8zhmB6tnM1WRPWy1sgKiOO/Gtri9/0sU=

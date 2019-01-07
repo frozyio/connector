@@ -1,10 +1,11 @@
 # build stage
-FROM golang:1.11.3 AS build-env
+FROM golang:1.11.4 AS build-env
 WORKDIR /go/src/gitlab.com/frozy.io
 ADD . connector/
 WORKDIR connector
+ARG VERSION
 RUN make deps
-RUN make build
+RUN VERSION=$VERSION make build 
 
 # Broker itself
 FROM alpine:3.8
@@ -14,7 +15,7 @@ RUN addgroup -g 1000 frozyconnector && \
 USER frozyconnector
 COPY --chown=frozyconnector:frozyconnector \
   --from=build-env \
-  /go/src/gitlab.com/frozy.io/connector/connector \
+  /go/src/gitlab.com/frozy.io/connector/bin/connector-linux-amd64* \
   /home/frozyconnector/connector
 ENV FROZY_CONFIG_DIR=/home/frozyconnector/.frozy-connector
 ENTRYPOINT ["/home/frozyconnector/connector"]

@@ -14,11 +14,6 @@ type connectorArgs struct {
 
 var params connectorArgs
 
-func init() {
-	rootCmd.PersistentFlags().StringVar(&params.configFile,
-		"config", "", "config file (default is $HOME/.frozy-connector/connector.yaml)")
-}
-
 var rootCmd = &cobra.Command{
 	Use:   "connector",
 	Short: "Frozy Connector",
@@ -28,6 +23,19 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 	},
+}
+
+func init() {
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "display application version",
+		Run: func(cmd *cobra.Command, args []string) {
+			println(app.Version)
+		},
+	}
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.PersistentFlags().StringVar(&params.configFile,
+		"config", "", "config file (default is $HOME/.frozy-connector/connector.yaml)")
 }
 
 // Execute is a main entry

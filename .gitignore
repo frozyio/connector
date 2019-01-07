@@ -1,3 +1,4 @@
-/connector
-/connector.yaml
-/connector.sh
+connector
+connector.yaml
+bin/*
+dist/*
