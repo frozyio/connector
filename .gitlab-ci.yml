@@ -1,15 +1,18 @@
-image: docker:latest
+image: golang:1.11.4
 
 services:
   - docker:dind
 
 before_script:
-  - apk update && apk add make git
+  - mkdir -p /go/src/gitlab.com/frozy.io
+  - cp -r $CI_PROJECT_DIR /go/src/gitlab.com/frozy.io
+  - make deps
 
 build-validate:
   stage: build
   script:
-    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" REGISTRY_IMAGE_TAG="$CI_REGISTRY_IMAGE_TAG" image
+    - make build
+    - make test
   except:
     - /^release\/.*$/
 

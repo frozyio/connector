@@ -64,12 +64,12 @@ type FrozyConfig struct {
 
 // JoinTokenConfig .
 type JoinTokenConfig struct {
-	Token string
+	Token Secret
 }
 
 // AccessTokenConfig .
 type AccessTokenConfig struct {
-	Token        string `yaml:"access_token"`
+	Token        Secret `yaml:"access_token"`
 	Resource     string
 	FailIfExists bool     `yaml:"fail_if_exists,omitempty"`
 	Provider     Endpoint `yaml:",omitempty"`
@@ -133,16 +133,22 @@ func (c Config) IsConnectorConfigured() bool {
 }
 
 // IsAccessTokenConfigured returns is configuration ready for create join token
-func (c Config) IsAccessTokenConfigured() bool {
-	if c.Access.Token == "" {
-		return false
+func (c Config) IsAccessTokenConfigured() (bool, error) {
+	at, err := c.Access.Token.Value()
+
+	if err != nil {
+		return false, err
+	}
+
+	if at == nil {
+		return false, nil
 	}
 
 	if c.Access.Resource == "" {
 		fmt.Println("You should specify frozy connector resouce name in configuration file " +
 			"or set FROZY_RESOURCE_NAME environment variable " +
 			"for register connector using the access token.")
-		return false
+		return false, nil
 	}
 
 	isprovider := c.Access.Provider.Port != 0 && c.Access.Provider.Host != ""
@@ -151,10 +157,10 @@ func (c Config) IsAccessTokenConfigured() bool {
 		fmt.Println("You should specify frozy connector role in configuration file " +
 			"or set FROZY_[CONSUMER|PROVIDER]_[HOST|PORT] environment variable " +
 			"for register connector as consumer OR provider using the access token.")
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
 }
 
 // BrokerAddr .
@@ -233,13 +239,45 @@ func (c *Config) Load(optionalConfig string) {
 	}
 
 	fmt.Println("Loading config from", loadPath)
-	if bs, err := ioutil.ReadFile(loadPath); err == nil {
-		yaml.Unmarshal(bs, c)
-	} else {
+	bs, err := ioutil.ReadFile(loadPath)
+	if err == nil {
+		err = yaml.Unmarshal(bs, c)
+	}
+	if err != nil {
 		fmt.Printf("Warning: %s. Using FROZY_* env variables.\n", err)
 	}
 
 	c.enrichFromEnv()
+}
+
+// ResolveSecrets attempts to resolve all secrets present in configuration
+func (c *Config) ResolveSecrets() error {
+	err := c.Join.Token.Resolve()
+	if err != nil {
+		return err
+	}
+
+	err = c.Access.Token.Resolve()
+	return err
+}
+
+// ResolveSecretsRetryIntervalSeconds is amount of seconds to wait before trying
+// to resolve configuration secrets one more time.
+const ResolveSecretsRetryIntervalSeconds = 5
+
+// ResolveSecretsUntilSuccess calls ResolveSecrets as many times as required to
+// finally achieve success.
+func (c *Config) ResolveSecretsUntilSuccess() {
+	for {
+		err := c.ResolveSecrets()
+		if err == nil {
+			return
+		}
+
+		fmt.Printf("Failed to resolve secrets: %v\n", err)
+		fmt.Printf("Retrying in %d seconds\n", ResolveSecretsRetryIntervalSeconds)
+		time.Sleep(ResolveSecretsRetryIntervalSeconds * time.Second)
+	}
 }
 
 // UpdateCache updates configuration with registration reply
@@ -277,8 +315,11 @@ func (c *Config) UpdateCache(data []byte, save bool) bool {
 }
 
 func (c Config) String() string {
-	bs, _ := yaml.Marshal(c)
-	return string(bs)
+	bs, err := yaml.Marshal(c)
+	if err == nil {
+		return string(bs)
+	}
+	return fmt.Sprintf("Failed to convert: %v", err)
 }
 
 func (c Config) Write() error {
@@ -293,6 +334,12 @@ func (c Config) Write() error {
 func checkSetString(key string, out *string) {
 	if viper.IsSet(key) {
 		*out = viper.GetString(key)
+	}
+}
+
+func checkSetSecret(key string, out *Secret) {
+	if viper.IsSet(key) {
+		*out = LiteralStringSecret(viper.GetString(key))
 	}
 }
 
@@ -318,10 +365,10 @@ func (c *Config) enrichFromEnv() {
 	checkSetUInt16("broker_port", &c.Frozy.Broker.Port)
 	checkSetString("backend_url", &c.Frozy.API.Root)
 
-	checkSetString("join_token", &c.Join.Token)
+	checkSetSecret("join_token", &c.Join.Token)
 
 	checkSetString("resource_name", &c.Access.Resource)
-	checkSetString("access_token", &c.Access.Token)
+	checkSetSecret("access_token", &c.Access.Token)
 	if viper.IsSet("consumer_port") {
 		c.Access.Consumer.Port = uint16(viper.GetInt("consumer_port"))
 	}

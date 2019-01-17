@@ -33,3 +33,31 @@ auto_registration:
 # If auto_registration section exists then either auto_registration.provider
 # or auto_registration.consumer section must exists. If there are both or none
 # then configuration is considered invalid.
+
+# join.token and auto_registration.access_token are so-called "secrets".
+# They can be specified as literal strings (like in an example above), but they
+# also support more complex specifications.
+#
+# If a secret is not a literal string it must be defined as YAML dictionary.
+# That dictionary has one mandatory key - "origin". Other keys might (or might
+# not) be required depending on a value of "origin". This value currently can
+# only be 'gce_instance_metadata'. Like this:
+#
+# auto_registration:
+#   access_token:
+#     origin: gce_instance_metadata
+#     attribute: "frozy-access-token"
+#
+# For each non-literal secret you can define a set of transformations. For
+# instance, you might want to base64-decode a value and feed it into KMS
+# decryption. This could be done like this:
+#
+# auto_registration:
+#   access_token:
+#     origin: gce_instance_metadata
+#     attribute: "frozy-access-token"
+#     transform:
+#       - base64_decode
+#       - type: google_kms_decrypt
+#         key: projects/<your-project>/locations/<your-location>/keyRings/<your-key-ring>/cryptoKeys/<your-crypto-key>
+#

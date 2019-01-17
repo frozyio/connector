@@ -36,6 +36,9 @@ func Execute(optionalConfig string) error {
 	connector.Config.Load(optionalConfig)
 	fmt.Printf("Initializing with:\n%s\n", connector.Config.String())
 
+	print("Resolving secrets in configuration...\n")
+	connector.Config.ResolveSecretsUntilSuccess()
+
 	if err := connector.initialize(); err != nil {
 		return err
 	}
@@ -55,12 +58,24 @@ func (c *Connector) initialize() error {
 		return nil
 	}
 
-	if c.Config.Join.Token == "" {
+	joinToken, err := c.Config.Join.Token.Value()
+	if err != nil {
+		return err
+	}
+
+	if joinToken == nil {
 		// Obtain join token using access token or from stdin
 
-		var err error
-		if c.Config.Access.Token != "" {
-			if !c.Config.IsAccessTokenConfigured() {
+		accessToken, err := c.Config.Access.Token.Value()
+		if err != nil {
+			return err
+		}
+		if accessToken != nil {
+			isAccessTokenConfigured, err := c.Config.IsAccessTokenConfigured()
+			if err != nil {
+				return err
+			}
+			if !isAccessTokenConfigured {
 				return fmt.Errorf("Invalid connector configuraiotn")
 			}
 			if c.Config.Access.Provider.Host == "" && c.Config.Access.Provider.Port != 0 {
@@ -162,7 +177,8 @@ func (c *Connector) readJoinTokenFromStdin() error {
 	if err != nil {
 		return err
 	}
-	c.Config.Join.Token = strings.Replace(joinToken, "\n", "", -1)
+	c.Config.Join.Token = config.LiteralStringSecret(
+		strings.Replace(joinToken, "\n", "", -1))
 	return nil
 }
 
@@ -174,7 +190,13 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 		if err != nil {
 			return 0, nil, err
 		}
-		request.Header.Add("X-Access-Token", c.Config.Access.Token)
+
+		accessToken, err := c.Config.Access.Token.Value()
+		if err != nil {
+			return 0, nil, err
+		}
+
+		request.Header.Add("X-Access-Token", string(accessToken))
 		if err != nil {
 			return 0, nil, err
 		}
@@ -234,7 +256,7 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 		return fmt.Errorf("Invalid create join token response")
 	}
 
-	c.Config.Join.Token = string(response)
+	c.Config.Join.Token = config.LiteralSecret(response)
 	return nil
 }
 
@@ -265,7 +287,12 @@ func (c *Connector) downloadConfig() ([]byte, error) {
 		return nil, err
 	}
 
-	bodyWriter.WriteField("token", c.Config.Join.Token)
+	joinToken, err := c.Config.Join.Token.Value()
+	if err != nil {
+		return nil, err
+	}
+
+	bodyWriter.WriteField("token", string(joinToken))
 	if err = bodyWriter.Close(); err != nil {
 		return nil, err
 	}
