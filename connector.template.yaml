@@ -27,6 +27,23 @@
 #       - base64_decode
 #       - type: google_kms_decrypt
 #         key: projects/<your-project>/locations/<your-location>/keyRings/<your-key-ring>/cryptoKeys/<your-crypto-key>
+#
+# google_kms_decrypt transformation does what you would expect from its name.
+# key attribute must be Google Cloud Resource Name for KMS key to be used to
+# decrypt value. An important thing is that key attribute of google_kms_decrypt
+# transformation is itself a remote value. This enables some particularly
+# interesting scenarios:
+#
+# auto_registration:
+#   access_token:
+#     origin: gce_instance_metadata
+#     attribute: "frozy-access-token"
+#     transform:
+#       - base64_decode
+#       - type: google_kms_decrypt
+#         key:
+#           origin: gce_instance_metadata
+#           attribute: frozy-access-token-key
 
 frozy:
   # tier field supports remote value syntax

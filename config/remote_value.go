@@ -48,6 +48,9 @@ type Origin interface {
 }
 
 // Transformation modifies remote value obtained from the Origin (decodes/decrypts)
+//
+// Important corner case is that transformations are allowed to have attributes
+// that are RemoteValue themselves.
 type Transformation interface {
 	// Transform performs the transformation of remote value.
 	Transform([]byte) ([]byte, error)
@@ -285,6 +288,8 @@ func (x *RemoteValue) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			}
 			x.origin = &gceInstanceMetadataOrigin
 			return nil
+		default:
+			return fmt.Errorf("Unknown origin for remote value: %q", generic.Origin)
 		}
 	}
 
@@ -349,7 +354,7 @@ func (x TransformBase64Decode) MarshalYAML() (interface{}, error) {
 // TransformGoogleKMSDecrypt is a Transformation that decrypts its input with
 // Google KMS key with given properties
 type TransformGoogleKMSDecrypt struct {
-	Key string `yaml:"key"`
+	Key RemoteValue `yaml:"key"`
 }
 
 // Transform implements Transformation.Transform for TransformGoogleKMSDecrypt
@@ -360,8 +365,14 @@ func (x TransformGoogleKMSDecrypt) Transform(in []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	var keyBytes []byte
+	keyBytes, err = x.Key.Value()
+	if err != nil {
+		return nil, err
+	}
+
 	req := &kmspb.DecryptRequest{
-		Name:       x.Key,
+		Name:       string(keyBytes),
 		Ciphertext: in,
 	}
 
