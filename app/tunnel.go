@@ -43,7 +43,12 @@ func (c *Connector) runConsumer() error {
 		return err
 	}
 
-	broker := brokerClient{cfg: sshConfig, addr: c.Config.Frozy.BrokerAddr(), mutex: &sync.Mutex{}}
+	brokerAddr, err := c.Config.Frozy.BrokerAddr()
+	if err != nil {
+		return err
+	}
+
+	broker := brokerClient{cfg: sshConfig, addr: brokerAddr, mutex: &sync.Mutex{}}
 	go broker.keepConnected()
 
 	listener, err := net.Listen("tcp", c.Config.Connect.Addr.String())
@@ -83,10 +88,15 @@ func (c *Connector) runProvider() error {
 		return err
 	}
 
+	brokerAddr, err := c.Config.Frozy.BrokerAddr()
+	if err != nil {
+		return err
+	}
+
 	for {
-		fmt.Println("Connecting to broker at", c.Config.Frozy.BrokerAddr().String())
+		fmt.Println("Connecting to broker at", brokerAddr.String())
 		// listener, err := listener(c.Config.Connect.RemoteResourse(), c.Config.Frozy.BrokerAddr(), sshConfig)
-		sshClient, err := ssh_custom.Dial(c.Config.Frozy.BrokerAddr().String(), sshConfig)
+		sshClient, err := ssh_custom.Dial(brokerAddr.String(), sshConfig)
 		if err != nil {
 			fmt.Printf("SSH server dial error: %s\n", err)
 			time.Sleep(config.ReconnectTimeout)

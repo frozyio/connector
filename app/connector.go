@@ -36,8 +36,8 @@ func Execute(optionalConfig string) error {
 	connector.Config.Load(optionalConfig)
 	fmt.Printf("Initializing with:\n%s\n", connector.Config.String())
 
-	print("Resolving secrets in configuration...\n")
-	connector.Config.ResolveSecretsUntilSuccess()
+	print("Resolving remote values in configuration...\n")
+	connector.Config.ResolveRemoteValuesUntilSuccess()
 
 	if err := connector.initialize(); err != nil {
 		return err
@@ -71,7 +71,8 @@ func (c *Connector) initialize() error {
 			return err
 		}
 		if accessToken != nil {
-			isAccessTokenConfigured, err := c.Config.IsAccessTokenConfigured()
+			var isAccessTokenConfigured bool
+			isAccessTokenConfigured, err = c.Config.IsAccessTokenConfigured()
 			if err != nil {
 				return err
 			}
@@ -177,7 +178,7 @@ func (c *Connector) readJoinTokenFromStdin() error {
 	if err != nil {
 		return err
 	}
-	c.Config.Join.Token = config.LiteralStringSecret(
+	c.Config.Join.Token = config.LiteralString(
 		strings.Replace(joinToken, "\n", "", -1))
 	return nil
 }
@@ -185,7 +186,7 @@ func (c *Connector) readJoinTokenFromStdin() error {
 func (c *Connector) obtainJoinTokenFromAPI() error {
 	client := c.httpClient()
 
-	doRequest := func(meth, url string, data []byte) (int, []byte, error) {
+	doRequest := func(meth, url string, res string, data []byte) (int, []byte, error) {
 		request, err := http.NewRequest(meth, url, bytes.NewReader(data))
 		if err != nil {
 			return 0, nil, err
@@ -206,7 +207,7 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 				response.StatusCode = 200
 			} else {
 				return response.StatusCode, nil,
-					fmt.Errorf("Resource %s already exists", c.Config.Access.Resource)
+					fmt.Errorf("Resource %s already exists", res)
 			}
 		}
 
@@ -218,9 +219,13 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 		FarmID string
 	}
 
-	infoURL := c.Config.Frozy.APIURL() + "/info"
+	apiURL, err := c.Config.Frozy.APIURL()
+	if err != nil {
+		return err
+	}
+	infoURL := apiURL + "/info"
 	fmt.Println("Request farm ID url:", infoURL)
-	_, response, err := doRequest("GET", infoURL, nil)
+	_, response, err := doRequest("GET", infoURL, "", nil)
 	if err != nil {
 		return err
 	}
@@ -230,10 +235,17 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 	}
 	fmt.Println("FarmId:", info.FarmID)
 
-	resourceURL := fmt.Sprintf("%s/farm/%s/resources/%s",
-		c.Config.Frozy.APIURL(), info.FarmID, c.Config.Access.Resource)
+	var resourceNameBytes []byte
+	resourceNameBytes, err = c.Config.Access.Resource.Value()
+	if err != nil {
+		return err
+	}
+	resourceName := string(resourceNameBytes)
+
+	resourceURL := fmt.Sprintf("%s/farm/%s/resources/%s", apiURL, info.FarmID,
+		resourceName)
 	fmt.Println("Create resource url:  ", resourceURL)
-	if _, _, err = doRequest("PUT", resourceURL, nil); err != nil {
+	if _, _, err = doRequest("PUT", resourceURL, resourceName, nil); err != nil {
 		return err
 	}
 
@@ -248,7 +260,7 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 			config.Provider, c.Config.Access.Provider.Port, c.Config.Access.Provider.Host)
 	}
 	fmt.Println(payload)
-	_, response, err = doRequest("POST", tokenURL, []byte(payload))
+	_, response, err = doRequest("POST", tokenURL, "", []byte(payload))
 	if err != nil {
 		return err
 	}
@@ -256,7 +268,7 @@ func (c *Connector) obtainJoinTokenFromAPI() error {
 		return fmt.Errorf("Invalid create join token response")
 	}
 
-	c.Config.Join.Token = config.LiteralSecret(response)
+	c.Config.Join.Token = config.LiteralString(string(response))
 	return nil
 }
 
@@ -297,7 +309,10 @@ func (c *Connector) downloadConfig() ([]byte, error) {
 		return nil, err
 	}
 
-	api := c.Config.Frozy.RegistrationURL()
+	api, err := c.Config.Frozy.RegistrationURL()
+	if err != nil {
+		return nil, err
+	}
 	fmt.Printf("Downloading config from %s\n", api)
 
 	request, err := http.NewRequest("POST", api, body)

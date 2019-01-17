@@ -54,23 +54,23 @@ type URLConfig struct {
 
 // FrozyConfig is for Frozy infrastucture connection
 type FrozyConfig struct {
-	Tier         string    `yaml:",omitempty"`
-	HTTPSchema   string    `yaml:"http_schema,omitempty"`
-	Insecure     bool      `yaml:",omitempty"`
-	Broker       Endpoint  `yaml:",omitempty"`
-	Registration URLConfig `yaml:",omitempty"`
-	API          URLConfig `yaml:",omitempty"`
+	Tier         RemoteValue `yaml:",omitempty"`
+	HTTPSchema   string      `yaml:"http_schema,omitempty"`
+	Insecure     bool        `yaml:",omitempty"`
+	Broker       Endpoint    `yaml:",omitempty"`
+	Registration URLConfig   `yaml:",omitempty"`
+	API          URLConfig   `yaml:",omitempty"`
 }
 
 // JoinTokenConfig .
 type JoinTokenConfig struct {
-	Token Secret
+	Token RemoteValue
 }
 
 // AccessTokenConfig .
 type AccessTokenConfig struct {
-	Token        Secret `yaml:"access_token"`
-	Resource     string
+	Token        RemoteValue `yaml:"access_token"`
+	Resource     RemoteValue
 	FailIfExists bool     `yaml:"fail_if_exists,omitempty"`
 	Provider     Endpoint `yaml:",omitempty"`
 	Consumer     Endpoint `yaml:",omitempty"`
@@ -113,13 +113,13 @@ func (c ConnectorConfig) RemoteResourse() Endpoint {
 	return Endpoint{c.Farm + "." + c.Resource, defaultRemoteResoursePort}
 }
 
-// RegistrationURL returns full base URL to frozy joint token registration API
-func (c FrozyConfig) RegistrationURL() string {
+// RegistrationURL returns full base URL to frozy join token registration API
+func (c FrozyConfig) RegistrationURL() (string, error) {
 	return c.buildURL(c.Registration.Root, c.Registration.Path, defaultRegPath)
 }
 
 // APIURL returns full base URL to frozy HTTP API
-func (c FrozyConfig) APIURL() string {
+func (c FrozyConfig) APIURL() (string, error) {
 	return c.buildURL(c.API.Root, c.API.Path, defaultAPIPath)
 }
 
@@ -144,7 +144,12 @@ func (c Config) IsAccessTokenConfigured() (bool, error) {
 		return false, nil
 	}
 
-	if c.Access.Resource == "" {
+	resource, err := c.Access.Resource.Value()
+	if err != nil {
+		return false, err
+	}
+
+	if resource == nil {
 		fmt.Println("You should specify frozy connector resouce name in configuration file " +
 			"or set FROZY_RESOURCE_NAME environment variable " +
 			"for register connector using the access token.")
@@ -164,25 +169,33 @@ func (c Config) IsAccessTokenConfigured() (bool, error) {
 }
 
 // BrokerAddr .
-func (c FrozyConfig) BrokerAddr() Endpoint {
+func (c FrozyConfig) BrokerAddr() (Endpoint, error) {
 	rv := c.Broker
 	if rv.Host == "" {
-		rv.Host = fmt.Sprintf("broker.%s%s", c.tier(), defaultDomain)
+		tier, err := c.tier()
+		if err != nil {
+			return Endpoint{}, err
+		}
+		rv.Host = fmt.Sprintf("broker.%s%s", tier, defaultDomain)
 	}
 	if rv.Port == 0 {
 		rv.Port = defaultBrokerPort
 	}
-	return rv
+	return rv, nil
 }
 
-func (c FrozyConfig) tier() string {
-	if c.Tier != "" {
-		return c.Tier + "."
+func (c FrozyConfig) tier() (string, error) {
+	tier, err := c.Tier.Value()
+	if err != nil {
+		return "", err
 	}
-	return ""
+	if tier != nil {
+		return string(tier) + ".", nil
+	}
+	return "", nil
 }
 
-func (c FrozyConfig) buildURL(root, path, defaultPath string) string {
+func (c FrozyConfig) buildURL(root, path, defaultPath string) (string, error) {
 	empty := url.URL{}
 	url, err := url.Parse(root)
 	if err != nil {
@@ -201,7 +214,11 @@ func (c FrozyConfig) buildURL(root, path, defaultPath string) string {
 		}
 	}
 	if url.Host == "" {
-		url.Host = c.tier() + defaultDomain
+		tier, err := c.tier()
+		if err != nil {
+			return "", err
+		}
+		url.Host = tier + defaultDomain
 	}
 	if path == "" {
 		url.Path = defaultPath
@@ -209,7 +226,7 @@ func (c FrozyConfig) buildURL(root, path, defaultPath string) string {
 		url.Path = path
 	}
 
-	return url.String()
+	return url.String(), nil
 }
 
 func (c Config) filepath() string {
@@ -250,9 +267,20 @@ func (c *Config) Load(optionalConfig string) {
 	c.enrichFromEnv()
 }
 
-// ResolveSecrets attempts to resolve all secrets present in configuration
-func (c *Config) ResolveSecrets() error {
-	err := c.Join.Token.Resolve()
+// ResolveRemoteValues attempts to resolve all remote values present in
+// configuration
+func (c *Config) ResolveRemoteValues() error {
+	err := c.Frozy.Tier.Resolve()
+	if err != nil {
+		return err
+	}
+
+	err = c.Join.Token.Resolve()
+	if err != nil {
+		return err
+	}
+
+	err = c.Access.Resource.Resolve()
 	if err != nil {
 		return err
 	}
@@ -261,22 +289,22 @@ func (c *Config) ResolveSecrets() error {
 	return err
 }
 
-// ResolveSecretsRetryIntervalSeconds is amount of seconds to wait before trying
-// to resolve configuration secrets one more time.
-const ResolveSecretsRetryIntervalSeconds = 5
+// ResolveRemoteValuesRetryIntervalSeconds is amount of seconds to wait before
+// trying to resolve configuration remote values one more time.
+const ResolveRemoteValuesRetryIntervalSeconds = 5
 
-// ResolveSecretsUntilSuccess calls ResolveSecrets as many times as required to
+// ResolveRemoteValuesUntilSuccess calls ResolveSecrets as many times as required to
 // finally achieve success.
-func (c *Config) ResolveSecretsUntilSuccess() {
+func (c *Config) ResolveRemoteValuesUntilSuccess() {
 	for {
-		err := c.ResolveSecrets()
+		err := c.ResolveRemoteValues()
 		if err == nil {
 			return
 		}
 
-		fmt.Printf("Failed to resolve secrets: %v\n", err)
-		fmt.Printf("Retrying in %d seconds\n", ResolveSecretsRetryIntervalSeconds)
-		time.Sleep(ResolveSecretsRetryIntervalSeconds * time.Second)
+		fmt.Printf("Failed to resolve remote values: %v\n", err)
+		fmt.Printf("Retrying in %d seconds\n", ResolveRemoteValuesRetryIntervalSeconds)
+		time.Sleep(ResolveRemoteValuesRetryIntervalSeconds * time.Second)
 	}
 }
 
@@ -337,9 +365,9 @@ func checkSetString(key string, out *string) {
 	}
 }
 
-func checkSetSecret(key string, out *Secret) {
+func checkSetRemoteValue(key string, out *RemoteValue) {
 	if viper.IsSet(key) {
-		*out = LiteralStringSecret(viper.GetString(key))
+		*out = LiteralString(viper.GetString(key))
 	}
 }
 
@@ -356,7 +384,7 @@ func checkSetBool(key string, out *bool) {
 }
 
 func (c *Config) enrichFromEnv() {
-	checkSetString("tier", &c.Frozy.Tier)
+	checkSetRemoteValue("tier", &c.Frozy.Tier)
 	checkSetString("registration_http_schema", &c.Frozy.HTTPSchema)
 	checkSetBool("insecure", &c.Frozy.Insecure)
 	checkSetString("registration_http_root", &c.Frozy.Registration.Root)
@@ -365,10 +393,10 @@ func (c *Config) enrichFromEnv() {
 	checkSetUInt16("broker_port", &c.Frozy.Broker.Port)
 	checkSetString("backend_url", &c.Frozy.API.Root)
 
-	checkSetSecret("join_token", &c.Join.Token)
+	checkSetRemoteValue("join_token", &c.Join.Token)
 
-	checkSetString("resource_name", &c.Access.Resource)
-	checkSetSecret("access_token", &c.Access.Token)
+	checkSetRemoteValue("resource_name", &c.Access.Resource)
+	checkSetRemoteValue("access_token", &c.Access.Token)
 	if viper.IsSet("consumer_port") {
 		c.Access.Consumer.Port = uint16(viper.GetInt("consumer_port"))
 	}

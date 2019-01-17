@@ -13,51 +13,50 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// Secret obtains sensitive value from different more or less secure origins and
-// optionally decrypts/decodes it.
-type Secret struct {
+// RemoteValue is configuration value that can be obtained from remote source
+// and optionally be transformed do decrypt/decode it.
+type RemoteValue struct {
 	origin          Origin
 	transformations []Transformation
 	resolvedValue   []byte
 	isResolved      bool
 }
 
-// LiteralStringSecret constructs the most trivial kind of secret - a literal
-// string value.
-func LiteralStringSecret(secret string) Secret {
-	return LiteralSecret([]byte(secret))
+// LiteralString constructs the most trivial kind of remote value - a literal
+// string.
+func LiteralString(value string) RemoteValue {
+	return LiteralStringOrigin{LiteralValue: value}.ToRemoteValue()
 }
 
-// LiteralSecret constructs the most trivial kind of secret - a literal byte
-// array value.
-func LiteralSecret(secret []byte) Secret {
-	return LiteralOrigin{LiteralValue: secret}.ToSecret()
+// LiteralBytes constructs the most trivial kind of remote value - a literal
+// byte array.
+func LiteralBytes(value []byte) RemoteValue {
+	return LiteralBytesOrigin{LiteralValue: value}.ToRemoteValue()
 }
 
-// Origin is where secret values come from. (config file, GCE Instance
+// Origin is where remote values come from. (config file, GCE Instance
 // Metadata, etc...)
 type Origin interface {
-	// Obtain retreives secret value from the store.
+	// Obtain retreives remote value from the store.
 	Obtain() ([]byte, error)
 	// Marshals given origin to YAML in a shortest form possible. Result may be
-	// a literal string
+	// scalar (a literal string, for instance)
 	MarshalYAMLShort() (interface{}, error)
 
-	// Marshals given origin to full form. Result must be a dictionary (or
-	// something that marshals to a dictionary)
+	// Marshals given origin to full form. Result must be a dictionary
 	MarshalYAMLFull() (yaml.MapSlice, error)
 }
 
-// Transformation modifies secret value obtained from the Origin (decodes/decrypts)
+// Transformation modifies remote value obtained from the Origin (decodes/decrypts)
 type Transformation interface {
-	// Transform performs the transformation of secret value.
+	// Transform performs the transformation of remote value.
 	Transform([]byte) ([]byte, error)
 
 	yaml.Marshaler
 }
 
-// Value gets plaintext value of a secret. Resolves secret if neccesary.
-func (x *Secret) Value() ([]byte, error) {
+// Value gets an actual value. Resolves it if neccesary.
+func (x *RemoteValue) Value() ([]byte, error) {
 	if !x.isResolved {
 		err := x.Resolve()
 		if err != nil {
@@ -67,15 +66,15 @@ func (x *Secret) Value() ([]byte, error) {
 	return x.resolvedValue, nil
 }
 
-// IsResolved returns true if plaintext value is ready. If this function returns
+// IsResolved returns true if actual value is ready. If this function returns
 // true, Value() method is guaranteed to succeed.
-func (x Secret) IsResolved() bool {
+func (x RemoteValue) IsResolved() bool {
 	return x.isResolved
 }
 
-// Resolve ensures that plaintext value is ready. If this function returns nil
+// Resolve ensures that actual value is ready. If this function returns nil
 // (which means success) then IsResolved is guaranteed to return true
-func (x *Secret) Resolve() error {
+func (x *RemoteValue) Resolve() error {
 	if x.isResolved {
 		return nil
 	}
@@ -103,8 +102,8 @@ func (x *Secret) Resolve() error {
 	return nil
 }
 
-// MarshalYAML implements yaml.Marshaler for Secret
-func (x Secret) MarshalYAML() (interface{}, error) {
+// MarshalYAML implements yaml.Marshaler for RemoteValue
+func (x RemoteValue) MarshalYAML() (interface{}, error) {
 	if x.origin == nil {
 		return nil, nil
 	}
@@ -124,26 +123,53 @@ func (x Secret) MarshalYAML() (interface{}, error) {
 	return slice, nil
 }
 
-// LiteralOrigin is a secret Origin that obtains secret by returning the same
-// simple literal value
-type LiteralOrigin struct {
+// LiteralBytesOrigin is an Origin that obtains value by returning the same
+// simple literal of type []byte
+type LiteralBytesOrigin struct {
 	LiteralValue []byte `yaml:"value"`
 }
 
-type literalString struct {
-	LiteralValue string `yaml:"value"`
-}
+// Obtain is an implementation of Origin.Obtain for LiteralBytesOrigin
+func (x LiteralBytesOrigin) Obtain() ([]byte, error) { return x.LiteralValue, nil }
 
-// Obtain is an implementation of Origin.Obtain for LiteralOrigin
-func (x LiteralOrigin) Obtain() ([]byte, error) { return x.LiteralValue, nil }
-
-// MarshalYAMLShort is an implementation of Origin.MarshalYAMLShort for LiteralOrigin
-func (x LiteralOrigin) MarshalYAMLShort() (interface{}, error) {
-	return string(x.LiteralValue), nil
+// MarshalYAMLShort is an implementation of Origin.MarshalYAMLShort for LiteralBytesOrigin
+func (x LiteralBytesOrigin) MarshalYAMLShort() (interface{}, error) {
+	return x.LiteralValue, nil
 }
 
 // MarshalYAMLFull is an implementation of Origin.MarshalYAMLFull for LiteralOrigin
-func (x LiteralOrigin) MarshalYAMLFull() (yaml.MapSlice, error) {
+func (x LiteralBytesOrigin) MarshalYAMLFull() (yaml.MapSlice, error) {
+	return yaml.MapSlice{
+		yaml.MapItem{
+			Key:   "origin",
+			Value: "literal_bytes",
+		},
+		yaml.MapItem{
+			Key:   "value",
+			Value: x.LiteralValue,
+		},
+	}, nil
+}
+
+// ToRemoteValue converts LiteralBytesOrigin to RemoteValue
+func (x LiteralBytesOrigin) ToRemoteValue() RemoteValue { return RemoteValue{origin: &x} }
+
+// LiteralStringOrigin is an Origin that obtains value by returning the same
+// simple literal of type string
+type LiteralStringOrigin struct {
+	LiteralValue string `yaml:"value"`
+}
+
+// Obtain is an implementation of Origin.Obtain for LiteralStringOrigin
+func (x LiteralStringOrigin) Obtain() ([]byte, error) { return []byte(x.LiteralValue), nil }
+
+// MarshalYAMLShort is an implementation of Origin.MarshalYAMLShort
+func (x LiteralStringOrigin) MarshalYAMLShort() (interface{}, error) {
+	return x.LiteralValue, nil
+}
+
+// MarshalYAMLFull is an implementation of Origin.MarhsalYAMLFull
+func (x LiteralStringOrigin) MarshalYAMLFull() (yaml.MapSlice, error) {
 	return yaml.MapSlice{
 		yaml.MapItem{
 			Key:   "origin",
@@ -151,16 +177,16 @@ func (x LiteralOrigin) MarshalYAMLFull() (yaml.MapSlice, error) {
 		},
 		yaml.MapItem{
 			Key:   "value",
-			Value: string(x.LiteralValue),
+			Value: x.LiteralValue,
 		},
 	}, nil
 }
 
-// ToSecret converts LiteralOrigin to Secret
-func (x LiteralOrigin) ToSecret() Secret { return Secret{origin: &x} }
+// ToRemoteValue converts LiteralStringOrigin to RemoteValue
+func (x LiteralStringOrigin) ToRemoteValue() RemoteValue { return RemoteValue{origin: &x} }
 
-// GceInstanceMetadataOrigin is a secret Origin that obtains secret value by
-// querying Google Compute Instance metadata.
+// GceInstanceMetadataOrigin is an Origin that obtains value by  querying Google
+// Compute Instance metadata.
 type GceInstanceMetadataOrigin struct {
 	Attribute string `yaml:"attribute"`
 }
@@ -220,13 +246,13 @@ type anyTransform struct {
 	transformation Transformation
 }
 
-// UnmarshalYAML implements yaml.Unmarshaler for Secret
-func (x *Secret) UnmarshalYAML(unmarshal func(interface{}) error) error {
+// UnmarshalYAML implements yaml.Unmarshaler for RemoteValue
+func (x *RemoteValue) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	// Attempt to unmarshal literal string:
 	var literal string
 	var generic genericSecretYAML
 	if err := unmarshal(&literal); err == nil {
-		x.origin = &LiteralOrigin{LiteralValue: []byte(literal)}
+		x.origin = &LiteralStringOrigin{LiteralValue: literal}
 		return nil
 	} else if err := unmarshal(&generic); err == nil {
 		x.transformations = make([]Transformation, 0, len(generic.Transform))
@@ -235,13 +261,21 @@ func (x *Secret) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 		// Okey-dockey, we've got ourselves an origin.
 		switch generic.Origin {
-		case "literal":
-			var lit literalString
+		case "literal_bytes":
+			var lit LiteralBytesOrigin
 			err := unmarshal(&lit)
 			if err != nil {
 				return err
 			}
-			x.origin = &LiteralOrigin{LiteralValue: []byte(lit.LiteralValue)}
+			x.origin = &lit
+			return nil
+		case "literal":
+			var lit LiteralStringOrigin
+			err := unmarshal(&lit)
+			if err != nil {
+				return err
+			}
+			x.origin = &lit
 			return nil
 		case "gce_instance_metadata":
 			var gceInstanceMetadataOrigin GceInstanceMetadataOrigin
@@ -254,7 +288,7 @@ func (x *Secret) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 	}
 
-	return errors.New("Neither literal value nor 'origin' key is present for a secret")
+	return errors.New("Neither literal value nor 'origin' key is present for a remote value")
 }
 
 type genericTransformYAML struct {
