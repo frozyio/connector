@@ -139,7 +139,7 @@ func (x LiteralOrigin) Obtain() ([]byte, error) { return x.LiteralValue, nil }
 
 // MarshalYAMLShort is an implementation of Origin.MarshalYAMLShort for LiteralOrigin
 func (x LiteralOrigin) MarshalYAMLShort() (interface{}, error) {
-	return x.LiteralValue, nil
+	return string(x.LiteralValue), nil
 }
 
 // MarshalYAMLFull is an implementation of Origin.MarshalYAMLFull for LiteralOrigin
@@ -151,7 +151,7 @@ func (x LiteralOrigin) MarshalYAMLFull() (yaml.MapSlice, error) {
 		},
 		yaml.MapItem{
 			Key:   "value",
-			Value: x.LiteralValue,
+			Value: string(x.LiteralValue),
 		},
 	}, nil
 }
