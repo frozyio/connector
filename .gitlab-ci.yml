@@ -1,26 +1,42 @@
-image: docker:latest
-
-services:
-  - docker:dind
-
-before_script:
-  - apk update && apk add make git
-
 build-validate:
+  image: golang:1.11.4
   stage: build
   script:
-    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" REGISTRY_IMAGE_TAG="$CI_REGISTRY_IMAGE_TAG" image
+    - mkdir -p /go/src/gitlab.com/frozy.io
+    - cp -r $CI_PROJECT_DIR /go/src/gitlab.com/frozy.io
+    - make deps
+    - make build
+    - make test
   except:
     - /^release\/.*$/
 
-build-push:
+build-release:
+  image: docker:latest
+  services:
+    - docker:dind
   stage: build
   script:
+    - apk update && apk add make git
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-    - VERSION=$(echo $CI_COMMIT_REF_NAME | sed "s:release/::g")
+    - export VERSION=$(echo $CI_COMMIT_REF_NAME | sed "s:release/::g")
     - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" image
     - docker push "$CI_REGISTRY_IMAGE:$VERSION"
   only:
     - /^release\/.*$/
   except:
     - branches
+
+build-latest:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: build
+  script:
+    - apk update && apk add make git
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - export VERSION="latest"
+    - make REGISTRY_IMAGE="$CI_REGISTRY_IMAGE" image
+    - docker push "$CI_REGISTRY_IMAGE:$VERSION"
+  only:
+    - branches
+    - master

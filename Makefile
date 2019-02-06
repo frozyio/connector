@@ -24,6 +24,9 @@ build:
 	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -tags netgo -ldflags '-w -s -X gitlab.com/frozy.io/connector/app.Version=${VERSION}' \
 		    -o bin/connector-macos-darwin-amd64-v${VERSION_MACOS}
 
+test: 
+	go test -v ./...
+
 dist: build
 	mkdir -p dist/
 	tar czvf dist/connector-linux-amd64-v${VERSION}.tar.gz -C bin connector-linux-amd64-v${VERSION}
