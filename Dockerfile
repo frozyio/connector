@@ -13,12 +13,13 @@ RUN VERSION=$VERSION make build
 # Broker itself
 FROM alpine:3.8
 RUN apk update && apk add ca-certificates
-RUN addgroup -g 1000 frozyconnector && \
-    adduser -D -u 1000 -G frozyconnector frozyconnector
-USER frozyconnector
-COPY --chown=frozyconnector:frozyconnector \
+RUN addgroup -g 1000 frozy && \
+    adduser -D -u 1000 -G frozy frozy
+USER frozy
+COPY --chown=frozy:frozy \
   --from=build-env \
   /go/src/gitlab.com/frozy.io/connector/bin/connector-linux-amd64* \
-  /home/frozyconnector/connector
-ENV FROZY_CONFIG_DIR=/home/frozyconnector/.frozy-connector
-ENTRYPOINT ["/home/frozyconnector/connector"]
+  /home/frozy/connector
+ENV FROZY_CONFIG_DIR=/home/frozy/.frozy-connector
+RUN mkdir -p $FROZY_CONFIG_DIR
+ENTRYPOINT ["/home/frozy/connector"]

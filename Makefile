@@ -12,10 +12,7 @@ REGISTRY_IMAGE ?= "frozy/connector"
 all:	deps build dist
 
 deps:
-	GOOS=linux   GOARCH=amd64 go get -t -d -v ./...
-	GOOS=linux   GOARCH=arm   go get -t -d -v ./...
-	GOOS=windows GOARCH=amd64 go get -t -d -v ./...
-	GOOS=darwin  GOARCH=amd64 go get -t -d -v ./...
+	go mod download
 
 build:
 	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -tags netgo -ldflags '-w -s -X gitlab.com/frozy.io/connector/app.Version=${VERSION}' -o bin/connector-linux-amd64-v${VERSION}
@@ -24,7 +21,7 @@ build:
 	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -tags netgo -ldflags '-w -s -X gitlab.com/frozy.io/connector/app.Version=${VERSION}' \
 		    -o bin/connector-macos-darwin-amd64-v${VERSION_MACOS}
 
-test: 
+test:
 	go test -v ./...
 
 dist: build

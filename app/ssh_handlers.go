@@ -3,47 +3,17 @@ package app
 import (
 	"fmt"
 	"io"
-	"net"
 	"sync"
 
+	//	log "github.com/sirupsen/logrus"
 	comm_app "gitlab.com/frozy.io/connector/common"
 	"golang.org/x/crypto/ssh"
 )
 
-func createSSHConn(sshData *sshRuntimeData) error {
-	var err error
-
-	fmt.Printf("Connecting to broker at %s\n", sshData.brokerConnStr)
-
-	// create network connection
-	conn, err := net.DialTimeout("tcp", sshData.brokerConnStr, sshData.sshCfg.Timeout)
-	if err != nil {
-		return err
-	}
-
-	// create SSH client connection
-	sshData.sshConn, sshData.sshConnChannels, sshData.sshConnRequests, err = ssh.NewClientConn(conn, sshData.brokerConnStr, sshData.sshCfg)
-	if err != nil {
-		return err
-	}
-
-	// now, trying to advertise ConnectorID from Broker
-	err = sshData.ConnectorRegisterIf.RegisterConnectorID(sshData.sshConn)
-	if err != nil {
-		sshData.sshConn.Close()
-		return err
-	}
-
-	// set connection status
-	sshData.StatusSet(true)
-
-	return nil
-}
-
 //******************************** SSH GLOBAL/CHANNEL REQUESTS *********************************
 
 // process SSH connection global requests
-func handleGlobalRequests(requests <-chan *ssh.Request, payload interface{}) {
+func handleGlobalRequests(sshRuntime *sshConnectionRuntime, app *applicationItemData) {
 	// define reply helper
 	replyHandle := func(req *ssh.Request, isError bool, msg []byte) {
 		if req == nil {
@@ -56,16 +26,16 @@ func handleGlobalRequests(requests <-chan *ssh.Request, payload interface{}) {
 	}
 
 	// wait global requests and processing it
-	for req := range requests {
+	for req := range sshRuntime.sshConnRequests {
 		switch req.Type {
 		case comm_app.SSHKeepAliveMsgType:
 			replyHandle(req, false, nil)
 		default:
-			fmt.Printf("Received unsupported request: type %s, wantReply %t, payload %v\n", req.Type, req.WantReply, req.Payload)
+			app.logger.Warnf("Received unsupported request from %s: type %s, wantReply %t, payload %v", BrokerInfo(sshRuntime), req.Type, req.WantReply, req.Payload)
 			// create transport container
 			replyDataLoc, errLocal := comm_app.ErrorViaCommunicationContainer("Unsupported request")
 			if errLocal != nil {
-				fmt.Printf("Can't create communication error object for received unsupported request due to: %v\n", errLocal)
+				app.logger.Errorf("Can't create communication error object for received unsupported request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
 				replyHandle(req, true, nil)
 			} else {
 				replyHandle(req, true, replyDataLoc)
@@ -73,75 +43,74 @@ func handleGlobalRequests(requests <-chan *ssh.Request, payload interface{}) {
 		}
 	}
 
-	fmt.Printf("Connection global requests handler closed\n")
+	app.logger.Debug("Connection global requests handler closed")
 }
 
 // supports requests inside created channels
 // we doesn't support that types of requests at all
-func handleChannelRequests(requests <-chan *ssh.Request) {
-	for req := range requests {
-		fmt.Printf("Got a request for connection: type %s, wantReply %t, payload %v. Reply with FALSE\n", req.Type, req.WantReply, req.Payload)
+func handleChannelRequests(pairConn *PairConnItem) {
+	for req := range pairConn.sshNewRequests {
+		pairConn.logger.Debugf("Got a request for paired connection: type %s, wantReply %t, payload %v. Reply with FALSE", req.Type, req.WantReply, req.Payload)
 
 		if req.WantReply {
 			req.Reply(false, nil)
 		}
 	}
 
-	fmt.Printf("Connection channel requests handler closed\n")
+	pairConn.logger.Debugf("Paired connection channel requests handler closed")
 }
 
 // ********************************  CHANNELS **********************************************
 // process SSH channel creation requests
 // this is main entry point for provide requests
-func handleChannelsCreation(newChannels <-chan ssh.NewChannel, payload interface{}) {
+func handleChannelsCreation(sshRuntime *sshConnectionRuntime, app *applicationItemData) {
+	app.logger.Debugf("SSH connection channels creation processing handler opened on %s", BrokerInfo(sshRuntime))
+
 	// wait until channel will be closed by connection shutdown and supply each request in new goroutine
-	for newChannel := range newChannels {
-		go handleNewChannel(newChannel, payload)
+	for newChannel := range sshRuntime.sshConnChannels {
+		go handleNewChannel(newChannel, sshRuntime, app)
 	}
 
-	fmt.Printf("SSH connection channels creation processing handler closed\n")
+	app.logger.Debugf("SSH connection channels creation processing handler closed on %s", BrokerInfo(sshRuntime))
 }
 
 // service SSH channel creation as separate process
-func handleNewChannel(newChannel ssh.NewChannel, payload interface{}) {
+func handleNewChannel(newChannel ssh.NewChannel, sshRuntime *sshConnectionRuntime, app *applicationItemData) {
 	chType := newChannel.ChannelType()
 
 	switch chType {
 	case comm_app.ProvideSSHChannelType:
-		switch payload.(type) {
-		case *registerAppData:
-			// we doesn't full assert with OK status because this part of job already done with switch statement
-			provAppDataPTR := payload.(*registerAppData)
-			// ok, we have proper provider`s handler, do processing
-			err := provAppDataPTR.provideApplication(newChannel)
+		// this commands is not for Intent application type
+		if !app.appIntentType {
+			err := app.provideApplication(newChannel, sshRuntime)
 			if err != nil {
 				// create transport container
 				replyData, errLocal := comm_app.ErrorViaCommunicationContainer(err.Error())
 				if errLocal != nil {
-					fmt.Printf("Can't create communication error object for received provide channel creation request due to: %v\n", errLocal)
+					app.logger.Errorf("Can't create communication error object for received provide channel creation request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
 					newChannel.Reject(ssh.ConnectionFailed, "")
 				} else {
 					newChannel.Reject(ssh.ConnectionFailed, string(replyData))
 				}
 				// because something goes wrong, we doesn't reset provide negiate status until connection closed
 			}
-		default:
+		} else {
 			// create transport container
 			replyData, errLocal := comm_app.ErrorViaCommunicationContainer("Internally unsupported payload struct type")
 			if errLocal != nil {
-				fmt.Printf("Can't create communication error object for received unsupported channel creation request due to: %v\n", errLocal)
+				app.logger.Errorf("Can't create communication error object for received unsupported channel creation request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
 				newChannel.Reject(ssh.ConnectionFailed, "")
 			} else {
 				newChannel.Reject(ssh.ConnectionFailed, string(replyData))
 			}
 		}
 	default:
-		fmt.Printf("Unsupported channel type: %s detected\n", chType)
+		app.logger.Warnf("Unsupported channel type %s detected in connection from %s", chType, BrokerInfo(sshRuntime))
 
 		// create transport container
 		replyData, errLocal := comm_app.ErrorViaCommunicationContainer(fmt.Sprintf("Unsupported channel type: %s detected", chType))
 		if errLocal != nil {
-			fmt.Printf("Can't create communication error object for received unsupported channel creation request due to: %v\n", errLocal)
+			app.logger.Errorf("Can't create communication error object for received unsupported channel creation request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
 			newChannel.Reject(ssh.ConnectionFailed, "")
 		} else {
 			newChannel.Reject(ssh.ConnectionFailed, string(replyData))
@@ -151,13 +120,13 @@ func handleNewChannel(newChannel ssh.NewChannel, payload interface{}) {
 }
 
 //************************** GENERIC DATA FORWARD **********************************************
-func connectionForward(tcpConn net.Conn, sshChannel ssh.Channel, sshRequest <-chan *ssh.Request, isProvideConnection bool) {
+func connectionForward(pcCtrl PairedConnectionClearIf, pairConn *PairConnItem) {
 	// define helper connection type name handler
 	connectionTypeName := func() string {
-		if isProvideConnection {
-			return "Provide"
-		} else {
+		if pairConn.intentConnection {
 			return "Consume"
+		} else {
+			return "Provide"
 		}
 	}
 
@@ -166,15 +135,23 @@ func connectionForward(tcpConn net.Conn, sshChannel ssh.Channel, sshRequest <-ch
 
 	// Prepare teardown function
 	close := func() {
-		tcpConn.Close()
-		sshChannel.Close()
+		pairConn.localTcpConn.Close()
+		pairConn.sshChannelIf.Close()
+
+		// delete paired connection from SSH context
+		err := pcCtrl.DeletePairConnection(pairConn)
+		if err != nil {
+			pairConn.logger.Errorf("Can't delete paired connection %d from registry", pairConn.connPairIDX)
+		} else {
+			pairConn.logger.Debugf("Paired connection %d successfully deleted from registry", pairConn.connPairIDX)
+		}
 
 		// waiting both IO buffer copy goroutines exited
 		wg.Wait()
 	}
 
 	// this is optional processing, it may be skipped
-	go handleChannelRequests(sshRequest)
+	go handleChannelRequests(pairConn)
 
 	// run channel buffers management
 	var once sync.Once
@@ -182,15 +159,16 @@ func connectionForward(tcpConn net.Conn, sshChannel ssh.Channel, sshRequest <-ch
 	// downstream
 	wg.Add(1)
 	go func() {
-		fmt.Printf("Downstream %s connection part %s <- %s started\n",
-			connectionTypeName(), tcpConn.RemoteAddr().String(), tcpConn.LocalAddr().String())
+		pairConn.logger.Debugf("Downstream %s connection part %s <- %s started",
+			connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String())
 
-		written, err := io.Copy(tcpConn, sshChannel)
+		written, err := io.Copy(pairConn.localTcpConn, pairConn.sshChannelIf)
 		if err != nil {
-			fmt.Printf("Donstream %s connection part closed with status: %v. Total transmitted bytes: %d\n", connectionTypeName(), err, written)
+			pairConn.logger.Debugf("Donstream %s connection part %s <- %s closed with status: %v. Total transmitted bytes: %d",
+				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), err, written)
 		} else {
-			fmt.Printf("Downstream %s connection part %s <- %s closed without errors. Total transmitted bytes: %d\n",
-				connectionTypeName(), tcpConn.RemoteAddr().String(), tcpConn.LocalAddr().String(), written)
+			pairConn.logger.Debugf("Downstream %s connection part %s <- %s closed without errors. Total transmitted bytes: %d",
+				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), written)
 		}
 
 		// we must not use DEFER here because wg.Wait() runs into close() func,
@@ -203,15 +181,16 @@ func connectionForward(tcpConn net.Conn, sshChannel ssh.Channel, sshRequest <-ch
 	// upstream
 	wg.Add(1)
 	go func() {
-		fmt.Printf("Upstream %s connection part %s -> %s started\n",
-			connectionTypeName(), tcpConn.RemoteAddr().String(), tcpConn.LocalAddr().String())
+		pairConn.logger.Debugf("Upstream %s connection part %s -> %s started",
+			connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String())
 
-		written, err := io.Copy(sshChannel, tcpConn)
+		written, err := io.Copy(pairConn.sshChannelIf, pairConn.localTcpConn)
 		if err != nil {
-			fmt.Printf("Upstream %s connection closed with status: %v. Total transmitted bytes: %d\n", connectionTypeName(), err, written)
+			pairConn.logger.Debugf("Upstream %s connection part %s -> %s closed with status: %v. Total transmitted bytes: %d",
+				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), err, written)
 		} else {
-			fmt.Printf("Upstream %s connection part %s -> %s closed without errors. Total transmitted bytes: %d\n",
-				connectionTypeName(), tcpConn.RemoteAddr().String(), tcpConn.LocalAddr().String(), written)
+			pairConn.logger.Debugf("Upstream %s connection part %s -> %s closed without errors. Total transmitted bytes: %d",
+				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), written)
 		}
 
 		// we must not use DEFER here because wg.Wait() runs into close() func,

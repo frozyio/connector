@@ -184,7 +184,7 @@ func FromStream(data []byte, out interface{}) error {
 
 // JSONErrorData provides erros messaging container
 type JSONErrorData struct {
-	ErrorMsg string `json: "error_msg"`
+	ErrorMsg string `json:"error_msg"`
 }
 
 // ToStream implements serializer for JSONConnectorIDRegisterRequest
@@ -201,7 +201,7 @@ func ErrorViaCommunicationContainer(err_str string) ([]byte, error) {
 	return result.ToStream()
 }
 
-// ErrorViaCommunicationContainer gets error message on input and serialize
+// ErrorFromStream gets error message stream on input and deserialize
 // it onto communication container structure
 func ErrorFromStream(data []byte) (string, error) {
 	var errorData JSONErrorData
@@ -218,11 +218,11 @@ func ErrorFromStream(data []byte) (string, error) {
 // for each Connector`s runtime. If this procedures did not completed, Broker will reject any
 // requests from such connector
 type ConnectorMetadata struct {
-	ConnectorName      string `json: "conn_name"`
-	ConnectorLocalIP   string `json: "conn_local_ip"`
-	ConnectorOSName    string `json: "conn_os_name"`
-	ConnectorHostname  string `json: "conn_hostname"`
-	ConnectorCloudName string `json: "conn_cloud_name"`
+	ConnectorName      string `json:"conn_name"`
+	ConnectorLocalIP   string `json:"conn_local_ip"`
+	ConnectorOSName    string `json:"conn_os_name"`
+	ConnectorHostname  string `json:"conn_hostname"`
+	ConnectorCloudName string `json:"conn_cloud_name"`
 	// some additional information here in future
 }
 
@@ -230,8 +230,8 @@ type ConnectorMetadata struct {
 // get Connector`s runtime identifier. If Connector already registered we send
 // current ConnectorID in metadata
 type JSONConnectorIDRegisterRequest struct {
-	ConnectorID   string            `json: "conn_id"`
-	ConnectorData ConnectorMetadata `json: "conn_metadata"`
+	ConnectorID   string            `json:"conn_id"`
+	ConnectorData ConnectorMetadata `json:"conn_metadata"`
 }
 
 // ToStream implements serializer for JSONConnectorIDRegisterRequest
@@ -243,7 +243,7 @@ func (j *JSONConnectorIDRegisterRequest) ToStream() ([]byte, error) {
 // If Connector already registered, he sent their own ID in request, Broker check that ID
 // and answers with SAME ID or error message if received ID isn't registered
 type JSONConnectorIDRegisterReply struct {
-	ConnectorID string `json: "conn_id"`
+	ConnectorID string `json:"conn_id"`
 }
 
 // ToStream implements serializer for JSONConnectorIDRegisterReply
@@ -353,6 +353,16 @@ func (f *StructuredApplicationName) ShortAppName() string {
 	// construct result string
 	result := []string{f.Name}
 	result = append(result, f.DomainList...)
+
+	return strings.Join(result, ".")
+}
+
+// LongAppName returns app name builded from app.name, app.domainList and owner fields
+func (f *StructuredApplicationName) LongAppName() string {
+	// construct result string
+	result := []string{f.Name}
+	result = append(result, f.DomainList...)
+	result = append(result, f.Owner)
 
 	return strings.Join(result, ".")
 }
@@ -522,12 +532,16 @@ func (a *StructuredApplicationName) EncodeToString() (string, error) {
 		return "", errors.New("Can't encode empty Name field")
 	}
 
+	//	fmt.Printf("APP name: %s, check 0: %v, check 1: %v\n", a.Name, hostnameAlphaRegex.MatchString(a.Name), hostnameDigitRegex.MatchString(a.Name))
+
 	// check for valid symbols in names
 	if !(hostnameAlphaRegex.MatchString(a.Name) && hostnameDigitRegex.MatchString(a.Name)) {
 		return "", errors.New("Invalid symbols in input struct (Name field)")
 	}
 
-	if !(validOwnerRegex.MatchString(a.Owner) && !IsSpecialNameUsed(a.Owner)) {
+	//	fmt.Printf("Owner: %s, check 0: %v, check 1: %v\n", a.Owner, validOwnerRegex.MatchString(a.Owner), IsSpecialNameUsed(a.Owner))
+
+	if !IsSpecialNameUsed(a.Owner) && !validOwnerRegex.MatchString(a.Owner) {
 		return "", errors.New("Invalid symbols in input struct (Owner field)")
 	}
 

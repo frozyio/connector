@@ -1,7 +1,13 @@
+# frozy section contains settings required to connect to Frozy infrastructure
 frozy:
   name: connector_name
+  # "access_token" field supports remote value syntax. See below for details.
+  access_token: "ABVdVrRy3ZC5Q8b3X1K3Nsehf7EJ9yWvfLvLQRHXwec1J"
+  # "tier" field supports remote value syntax.
   tier: sandbox
   http_schema: https
+  # "insecure" disables validating TLS certificates for Frozy services. Could
+  # be dangerous.
   insecure: true
   broker:
     host: custom.frozy.broker
@@ -10,32 +16,111 @@ frozy:
     http_root: http://custom.reg.cloud
     http_path: /reg/v1/register
 
-auto_registration:
-  access_token: "A2vHcq3oahZkwporuJXTJkCPJrHbiCuLWhQcHsDnAmfTf"
+# "applications" section lists apps to be registered by connector. Each application
+# would become available for connections. For each such connection connector will 
+# establish outbound TCP connection to given host and port.
+applications:
+  - name: "sql-backend.self.user-domain.sergey-afrozy-dio"
+    host: "localhost"
+    port: 5444
+  - name: "web-backend"
+    host: "localhost"
+    port: 5445
 
-applications-config:
-  applications: 
-    - name: "sql-backend.self.user-domain.sergey-afrozy-dio"
-      access_token: "ABVdVrRy3ZC5Q8b3X1K3Nsehf7EJ9yWvfLvLQRHXwec1J"
-      host: "localhost"
-      port: 5444    
-    - name: "web-backend"
-      access_token: "asdfasdfasdfasdffff"
-      host: "localhost"
-      port: 5445        
-      
-  intents: 
-    - src_name: "web-backend"
-      dst_name: "sql-backend.self.user-domain.sergey-afrozy-dio"
-      access_token: "ABVdVrRy3ZC5Q8b3X1K3Nsehf7EJ9yWvfLvLQRHXwec1J"
-      port: 5555  
+# "intents" section lists intents to be made by connector. Each intent would 
+# make connector to listen on given port number for inbound TCP connections.
+# TCP connections made to that port would be considered made by application 
+# named "src_name" and tunneled to an application named "dst_name"
+intents:
+  - src_name: "web-backend"
+    dst_name: "sql-backend.self.user-domain.sergey-afrozy-dio"
+    port: 5555
 
-# Config validation
+# "log" section configures connector logging.
+log:
+  # "console" section describes level and format of log messages appearing 
+  # at the console. To disable console logging, omit this section altogether.
+  console:
+    level: debug
+    # "format" possible values are "text" and "json"
+    format: text
+  # "console" section describes level and format of log messages that are  
+  # saved to file. To disable file logging, omit this section altogether.
+  file:
+    level: debug
+    path: frozy-broker.log
+    format: text
 
-# auto_registration sections must exist with access_token. If there are no access_token
-# in configuration then configuration is considered invalid.
+# Remote Value Syntax
+#
+# Some of the fields above support remote value syntax. It helps to maintain
+# complex configuration in cloud environments when it's not possible or not
+# feasible to embed values directly into configuration file. The idea is that
+# configuration file contains instructions on how to obtaining a value instead 
+# of having that value directly.
+#
+# Of course for the fileds that support remote value syntax we still allow 
+# good old string literals.
+#
+# To make use of a remote value define it as a dictionary instead of string. 
+# That dictionary must contain at least one key named "origin". Meaning of 
+# other keys depends on "origin" value. For instance the following block
+# makes connector get access token from Google Cloud Compute Instance 
+# metadata attribute named "frozy-access-token":
+#
+#   access_token:
+#     origin: gce_instance_metadata
+#     attribute: frozy-access-token
+#
+# To support more complicated scenarios, remote values can have a set of 
+# transformations. For instance that's how you store you access token
+# in Google Compute Instance metadata encrypted and make connector 
+# decrypt it on the fly:
+#
+#  access_token:
+#     origin: gce_instance_metadata
+#     attribute: frozy-access-token
+#     transform:
+#       - base64_decode
+#       - type: google_kms_decrypt
+#         key: projects/<your-project>/locations/<your-location>/keyRings/<your-key-ring>/cryptoKeys/<your-crypto-key>
+#
+# Available Origins:
+#
+# gce_instance_metadata 
+#
+#   Obtains remote value by reading Google Compute Instance metadata attribute.
+#   Syntax:
+#     origin: gce_instance_metadata
+#     attribute: <name of metadata attribute to read>
+#
+# Available transformations:
+#
+# base64_decode
+#
+#   Decodes base64-encoded character string
+#   Syntax:
+#     - base64_decode
+#   or:
+#     - type: base64_decode
+#
+# google_kms_decrypt
+#
+#   Decrypts value with a Google KMS key.
+#   Syntax:
+#     - type: google_kms_decrypt
+#       key: <selfLink for a key to be used for decryption>
+#
+#   Key attribute of google_kms_decrypt transformation supports Remote Value 
+#   syntax. This allows doing things like this:
+#
+#   access_token:
+#     origin: gce_instance_metadata
+#     attribute: frozy-access-token
+#     transform:
+#       - base64_decode
+#       - type: google_kms_decrypt
+#         key:
+#           origin: gce_instance_metadata
+#           attribute: frozy-access-token-key
 
-# In config there are either applications.provide or applications.consume or both of sections may exists. 
-# If there are none of them then configuration will be enriched from environment variables 
-# FROZY_APPLICATIONS_PROVIDE/FROZY_APPLICATIONS_CONSUME and if applications is not configured 
-# then configuration is considered invalid.
