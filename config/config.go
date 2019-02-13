@@ -79,6 +79,7 @@ type LogConfig struct {
 type LogConsoleConfig struct {
 	Level  string `mapstructure:"level" yaml:"level"`
 	Format string `mapstructure:"format" yaml:"format"`
+	Color  bool   `mapstructure:"color" yaml:"color"`
 }
 
 // LogFileConfig describes file logging config

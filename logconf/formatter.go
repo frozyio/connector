@@ -43,11 +43,15 @@ type WriterType uint64
 // OutputFormat stores Output type (text, json and so on)
 type OutputFormat uint64
 
+// OutputColored allows colored output
+type OutputColored bool
+
 // WriterData stores information about registered writers
 type WriterData struct {
 	Writer io.Writer
 	WriterType
 	OutputFormat
+	OutputColored
 	Level log.Level
 }
 
@@ -139,7 +143,7 @@ func (f *OutputFormatter) Format(entry *log.Entry) ([]byte, error) {
 				return nil, err
 			}
 		default:
-			return nil, errors.New("Uknown output format detected")
+			return nil, errors.New("Unknown output format detected")
 		}
 
 		_, err := writerVal.Writer.Write(b.Bytes())
@@ -242,7 +246,13 @@ func (f *multiFormatter) textFormat(entry *log.Entry, buffer *bytes.Buffer, writ
 		timestampFormat = defaultTimestampFormat
 	}
 
-	if !f.disableColors && (writerVal.WriterType == ConsoleLog) {
+	// disable colors if config param set
+	if writerVal.OutputColored == false {
+		f.disableColors = true
+	}
+
+	// if colors enabled and console output
+	if (writerVal.OutputColored == true) && (writerVal.WriterType == ConsoleLog) {
 		f.printColored(buffer, entry, keys, timestampFormat)
 	} else {
 		// in this case we output log level

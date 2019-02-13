@@ -44,7 +44,9 @@ log:
     level: debug
     # "format" possible values are "text" and "json"
     format: text
-  # "console" section describes level and format of log messages that are  
+    # colored logs can be enabled, disabled by default if "color" missing
+    color: true
+  # "file" section describes level and format of log messages that are  
   # saved to file. To disable file logging, omit this section altogether.
   file:
     level: debug

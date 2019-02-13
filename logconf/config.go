@@ -21,6 +21,7 @@ func FrozyInitLogging() (*log.Logger, error) {
 
 	if viper.IsSet(logToConsoleCfgFieldName) {
 		var outputFormat OutputFormat
+		var outputColored OutputColored
 
 		switch viper.GetString(logToConsoleCfgFieldName + ".format") {
 		case "text":
@@ -31,16 +32,25 @@ func FrozyInitLogging() (*log.Logger, error) {
 			return nil, fmt.Errorf("Invalid output format field detected in user input for console logging settings")
 		}
 
+		switch viper.GetBool(logToConsoleCfgFieldName + ".color") {
+		case true:
+			outputColored = true
+		default:
+			// anything except true disable colors
+			outputColored = false
+		}
+
 		logLevel, err := log.ParseLevel(viper.GetString(logToConsoleCfgFieldName + ".level"))
 		if err != nil {
 			return nil, fmt.Errorf("Invalid level format field detected in user input for console logging settings, %v", err)
 		}
 
 		err = logFormatter.AddWriter(&WriterData{
-			Writer:       io.Writer(os.Stdout),
-			WriterType:   ConsoleLog,
-			OutputFormat: outputFormat,
-			Level:        logLevel})
+			Writer:        io.Writer(os.Stdout),
+			WriterType:    ConsoleLog,
+			OutputFormat:  outputFormat,
+			OutputColored: outputColored,
+			Level:         logLevel})
 		if err != nil {
 			return nil, fmt.Errorf("Failed to add console writer to logging subsystem due to: %s", err)
 		}
