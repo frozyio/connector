@@ -372,15 +372,15 @@ type BlackListedBrokerData struct {
 
 // Connector describe connector instance configuration
 type Connector struct {
-	// flag is set when @broker@ section of config filled with
-	// data. In this mode connector works without AD_ALB services usage
-	staticBrokerMode bool
-
 	// atomically incremented connection counter
 	// this counter used for paired connections enumeration and also can be used for
 	// ordinary SSH connections enumeration that will useful if we will use
 	// shared SSH connections between different applications
 	conIDX uint64
+
+	// flag is set when @broker@ section of config filled with
+	// data. In this mode connector works without AD_ALB services usage
+	staticBrokerMode bool
 
 	// system logger
 	logger *log.Entry
@@ -418,6 +418,8 @@ type Connector struct {
 // BrokerConnectionIf implements interface for connector that supply intents/registers applications
 // with SSH connections to broker based on discovery data
 type BrokerConnectionIf interface {
+	// return new connection IDX
+	GetNewConnectionIDX() uint64
 	// GetBrokerList returns list of Brokers from cache
 	// function returns Broker list slice, desired connections per app and error code
 	GetBrokersList(desiredApp comm_app.StructuredApplicationName) ([]comm_app.BrokerInfoData, int, error)
@@ -425,8 +427,6 @@ type BrokerConnectionIf interface {
 	// function returns PTR on established SSH connection to requested broker where Connector_ID already registered
 	// connection ready to get requests
 	ConnectToBroker(brokerData comm_app.BrokerInfoData) (*sshConnectionRuntime, error)
-	// return new connection IDX
-	GetNewConnectionIDX() uint64
 	// adds broker into black list on defaultBlackListedBrokerAliveTime time from moment of adding
 	AddBrokerToBlackList(brokerData comm_app.BrokerInfoData) error
 	// filters broker list from black listed brokers
