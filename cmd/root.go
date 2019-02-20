@@ -6,19 +6,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"gitlab.com/frozy.io/connector/app"
+	"gitlab.com/frozy.io/connector/config"
 )
-
-type connectorArgs struct {
-	configFile string
-}
-
-var params connectorArgs
 
 var rootCmd = &cobra.Command{
 	Use:   "connector",
 	Short: "Frozy Connector",
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := app.Execute(params.configFile); err != nil {
+		if err := app.Execute(config.CmdLineParams); err != nil {
 			fmt.Println("Fatal error:", err.Error())
 			os.Exit(1)
 		}
@@ -34,8 +29,8 @@ func init() {
 		},
 	}
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.PersistentFlags().StringVar(&params.configFile,
-		"config", "", "config file (default is $HOME/.frozy-connector/connector.yaml)")
+	rootCmd.PersistentFlags().StringVar(&config.CmdLineParams.ConfigFile, "config", "", "config file (default is $HOME/.frozy-connector/connector.yaml)")
+	rootCmd.PersistentFlags().StringVar(&config.CmdLineParams.Insecure, "insecure", "", "enable insecured communications via HTTP (default is false)")
 }
 
 // Execute is a main entry

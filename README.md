@@ -1,6 +1,6 @@
 # Use with Docker
 
-To launch connector interactively, simply do
+To launch connector interactively, simply do:
 
         docker run -it --rm --net=host frozy/connector
 
@@ -29,8 +29,7 @@ intent could be like that:
 			- name: "sql-backend.self.user-domain.sergey-afrozy-dio"
 			  host: "localhost"
 			  port: 5444....
-
-		  intents:.
+		intents:.
 			- src_name: "web-backend"
 			  dst_name: "sql-backend.self.user-domain.sergey-afrozy-dio"
 			  port: 5555..
@@ -59,9 +58,15 @@ Or if you'd like to use access token to register and run new application provide
 
 Or if using configuration file:
 
+
         docker run -it --rm --net=host -v </absolute/path/to/config.yaml>:/home/frozy/.frozy-connector/connector.yaml frozy/connector
 
 Available environment (configuration) variables are:
+  * ```FROZY_INSECURE``` (```frozy.insecure```) - secure mode of HTTP communications (true - http or https, false - https only) 
+    with Frozy services that is used.
+
+    Default: false (use https only)
+
   * ```FROZY_TIER``` (```frozy.tier```) - tier (sandbox/demo/pilot/staging) of Frozy that is used.
 
     Default: none (use production tier)

@@ -2,15 +2,12 @@ package app
 
 import (
 	"fmt"
-	"io"
-	"sync"
 
-	//	log "github.com/sirupsen/logrus"
 	comm_app "gitlab.com/frozy.io/connector/common"
 	"golang.org/x/crypto/ssh"
 )
 
-//******************************** SSH GLOBAL/CHANNEL REQUESTS *********************************
+//******************************** SSH GLOBAL REQUESTS/CHANNEL HANDLING *********************************
 
 // process SSH connection global requests
 func handleGlobalRequests(sshRuntime *sshConnectionRuntime, app *applicationItemData) {
@@ -30,6 +27,36 @@ func handleGlobalRequests(sshRuntime *sshConnectionRuntime, app *applicationItem
 		switch req.Type {
 		case comm_app.SSHKeepAliveMsgType:
 			replyHandle(req, false, nil)
+		case comm_app.RegisterSSHRejectType:
+			app.logger.Warnf("Received registered application reject request from %s: wantReply %t", BrokerInfo(sshRuntime), req.WantReply)
+			err := app.ApplicationRejectHandler(sshRuntime, req.Payload, true)
+			if err != nil {
+				// create transport container
+				replyDataLoc, errLocal := comm_app.ErrorViaCommunicationContainer(err.Error())
+				if errLocal != nil {
+					app.logger.Errorf("Can't create communication error object for received registered application reject request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
+					replyHandle(req, true, nil)
+				} else {
+					replyHandle(req, true, replyDataLoc)
+				}
+			}
+			// answer with OK status
+			replyHandle(req, false, nil)
+		case comm_app.IntentSSHRejectType:
+			app.logger.Warnf("Received Intent application reject request from %s: wantReply %t", BrokerInfo(sshRuntime), req.WantReply)
+			err := app.ApplicationRejectHandler(sshRuntime, req.Payload, false)
+			if err != nil {
+				// create transport container
+				replyDataLoc, errLocal := comm_app.ErrorViaCommunicationContainer(err.Error())
+				if errLocal != nil {
+					app.logger.Errorf("Can't create communication error object for received Intent application reject request from %s due to: %v", BrokerInfo(sshRuntime), errLocal)
+					replyHandle(req, true, nil)
+				} else {
+					replyHandle(req, true, replyDataLoc)
+				}
+			}
+			// answer with OK status
+			replyHandle(req, false, nil)
 		default:
 			app.logger.Warnf("Received unsupported request from %s: type %s, wantReply %t, payload %v", BrokerInfo(sshRuntime), req.Type, req.WantReply, req.Payload)
 			// create transport container
@@ -44,20 +71,6 @@ func handleGlobalRequests(sshRuntime *sshConnectionRuntime, app *applicationItem
 	}
 
 	app.logger.Debug("Connection global requests handler closed")
-}
-
-// supports requests inside created channels
-// we doesn't support that types of requests at all
-func handleChannelRequests(pairConn *PairConnItem) {
-	for req := range pairConn.sshNewRequests {
-		pairConn.logger.Debugf("Got a request for paired connection: type %s, wantReply %t, payload %v. Reply with FALSE", req.Type, req.WantReply, req.Payload)
-
-		if req.WantReply {
-			req.Reply(false, nil)
-		}
-	}
-
-	pairConn.logger.Debugf("Paired connection channel requests handler closed")
 }
 
 // ********************************  CHANNELS **********************************************
@@ -116,87 +129,4 @@ func handleNewChannel(newChannel ssh.NewChannel, sshRuntime *sshConnectionRuntim
 			newChannel.Reject(ssh.ConnectionFailed, string(replyData))
 		}
 	}
-
-}
-
-//************************** GENERIC DATA FORWARD **********************************************
-func connectionForward(pcCtrl PairedConnectionClearIf, pairConn *PairConnItem) {
-	// define helper connection type name handler
-	connectionTypeName := func() string {
-		if pairConn.intentConnection {
-			return "Consume"
-		} else {
-			return "Provide"
-		}
-	}
-
-	// create WaitGroup for CopyBufferIO
-	wg := &sync.WaitGroup{}
-
-	// Prepare teardown function
-	close := func() {
-		pairConn.localTcpConn.Close()
-		pairConn.sshChannelIf.Close()
-
-		// delete paired connection from SSH context
-		err := pcCtrl.DeletePairConnection(pairConn)
-		if err != nil {
-			pairConn.logger.Errorf("Can't delete paired connection %d from registry", pairConn.connPairIDX)
-		} else {
-			pairConn.logger.Debugf("Paired connection %d successfully deleted from registry", pairConn.connPairIDX)
-		}
-
-		// waiting both IO buffer copy goroutines exited
-		wg.Wait()
-	}
-
-	// this is optional processing, it may be skipped
-	go handleChannelRequests(pairConn)
-
-	// run channel buffers management
-	var once sync.Once
-
-	// downstream
-	wg.Add(1)
-	go func() {
-		pairConn.logger.Debugf("Downstream %s connection part %s <- %s started",
-			connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String())
-
-		written, err := io.Copy(pairConn.localTcpConn, pairConn.sshChannelIf)
-		if err != nil {
-			pairConn.logger.Debugf("Donstream %s connection part %s <- %s closed with status: %v. Total transmitted bytes: %d",
-				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), err, written)
-		} else {
-			pairConn.logger.Debugf("Downstream %s connection part %s <- %s closed without errors. Total transmitted bytes: %d",
-				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), written)
-		}
-
-		// we must not use DEFER here because wg.Wait() runs into close() func,
-		// so one of defer() is never fire up because stack will be stocked in close()
-		wg.Done()
-
-		once.Do(close)
-	}()
-
-	// upstream
-	wg.Add(1)
-	go func() {
-		pairConn.logger.Debugf("Upstream %s connection part %s -> %s started",
-			connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String())
-
-		written, err := io.Copy(pairConn.sshChannelIf, pairConn.localTcpConn)
-		if err != nil {
-			pairConn.logger.Debugf("Upstream %s connection part %s -> %s closed with status: %v. Total transmitted bytes: %d",
-				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), err, written)
-		} else {
-			pairConn.logger.Debugf("Upstream %s connection part %s -> %s closed without errors. Total transmitted bytes: %d",
-				connectionTypeName(), pairConn.localTcpConn.RemoteAddr().String(), pairConn.localTcpConn.LocalAddr().String(), written)
-		}
-
-		// we must not use DEFER here because wg.Wait() runs into close() func,
-		// so one of defer() is never fire up because stack will be stocked in close()
-		wg.Done()
-
-		once.Do(close)
-	}()
 }

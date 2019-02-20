@@ -7,6 +7,7 @@ import (
 	"os/user"
 	"path"
 	"reflect"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -20,11 +21,19 @@ const (
 	defaultBrokerPort                     = 22
 	defaultHTTPSchema                     = "https"
 	defaultDomain                         = "frozy.cloud"
+	defaultALBPath                        = "/alb/api/v1/"
 	defaultRegPath                        = "/reg/v1/register"
-	defaultBrDiscPath                     = "/"
 	defaultRegistrationAccessTokenName    = "access-token"
 	defaultBrokerDiscoveryAccessTokenName = "X-Access-Token"
 )
+
+// ConnectorCmdLineArgs stores user defined command line arguments
+type ConnectorCmdLineArgs struct {
+	ConfigFile string
+	Insecure   string
+}
+
+var CmdLineParams ConnectorCmdLineArgs
 
 // ProvideAppInfo is provider application specific information
 type ProvideAppInfo struct {
@@ -111,7 +120,7 @@ func (c Config) RegistrationAccessTokenName() string {
 // BrokerDiscoveryAccessTokenName
 func (c Config) BrokerDiscoveryAccessTokenName() string {
 	if len(c.Frozy.BrokerDiscovery.AccessTokenName) == 0 {
-		return defaultRegistrationAccessTokenName
+		return defaultBrokerDiscoveryAccessTokenName
 	}
 
 	return c.Frozy.BrokerDiscovery.AccessTokenName
@@ -134,7 +143,7 @@ func (c FrozyConfig) RegistrationURL() (string, error) {
 
 // BrokerDiscoveryURL returns full base URL to frozy broker discovery service
 func (c FrozyConfig) BrokerDiscoveryURL() (string, error) {
-	return c.buildURL(c.BrokerDiscovery.Root, c.BrokerDiscovery.Path, defaultBrDiscPath)
+	return c.buildURL(c.BrokerDiscovery.Root, c.BrokerDiscovery.Path, defaultALBPath)
 }
 
 // BrokerAddr .
@@ -166,6 +175,16 @@ func (c FrozyConfig) tier() (string, error) {
 	return "", nil
 }
 
+func (c FrozyConfig) urlPolicyCheck(url string) (string, error) {
+	// check that URL corresponds to insecure flag
+	// if insecure is false, then URL MUST begins with https://
+	if !c.Insecure && !strings.HasPrefix(url, "https://") {
+		return "", fmt.Errorf("Connector configured in SECURED mode, but URL: %s set without https://", url)
+	}
+
+	return url, nil
+}
+
 func (c FrozyConfig) buildURL(root, path, defaultPath string) (string, error) {
 	if root == "" {
 		schema := c.HTTPSchema
@@ -181,7 +200,7 @@ func (c FrozyConfig) buildURL(root, path, defaultPath string) (string, error) {
 	if path == "" {
 		path = defaultPath
 	}
-	return root + path, nil
+	return c.urlPolicyCheck(root + path)
 }
 
 func (c Config) filepath() string {
@@ -194,12 +213,12 @@ func (c Config) String() string {
 }
 
 // Load configuration
-func (c *Config) Load(optionalConfig string) {
+func (c *Config) Load(optionalConfig ConnectorCmdLineArgs) {
 	viper.SetEnvPrefix("frozy")
 	viper.AllowEmptyEnv(true)
 	viper.AutomaticEnv()
 
-	// chek if config directory exists and create it if not
+	// check if config directory exists and create it if not
 	workDirectory = configDir()
 	if err := os.MkdirAll(workDirectory, os.ModeDir|0775); err != nil && !os.IsExist(err) {
 		fmt.Printf("Failed to make config directory: [%s] due to: %v\n", workDirectory, err)
@@ -207,8 +226,8 @@ func (c *Config) Load(optionalConfig string) {
 
 	// build full config path
 	loadPath := c.filepath()
-	if optionalConfig != "" {
-		loadPath = optionalConfig
+	if optionalConfig.ConfigFile != "" {
+		loadPath = optionalConfig.ConfigFile
 	}
 
 	fmt.Printf("Loading config from: %s\n", loadPath)
@@ -239,6 +258,13 @@ func (c *Config) Load(optionalConfig string) {
 	}
 
 	c.enrichFromEnv()
+
+	// because of insecure command line parameter have higher priority, overwrite config settings
+	if optionalConfig.Insecure == "true" {
+		c.Frozy.Insecure = true
+	} else if optionalConfig.Insecure == "false" {
+		c.Frozy.Insecure = false
+	}
 }
 
 // ResolveRemoteValues attempts to resolve all remote values present in
@@ -300,7 +326,8 @@ func (c *Config) enrichFromEnv() {
 	checkSetRemoteValue("tier", &c.Frozy.Tier)
 
 	// we will use FROZY_APPLICATIONS/FROZY_INTENTS environments with JSON data
-	var applications, intents string
+	var applications, intents, insecure string
+	checkSetString("insecure", &insecure)
 	checkSetString("applications", &applications)
 	checkSetString("intents", &intents)
 
@@ -349,6 +376,12 @@ func (c *Config) enrichFromEnv() {
 				checkIfAppExistsAndAdd(&appData)
 			}
 		}
+	}
+
+	if insecure == "true" {
+		c.Frozy.Insecure = true
+	} else if insecure == "false" {
+		c.Frozy.Insecure = false
 	}
 }
 

@@ -36,7 +36,11 @@ import (
 )
 
 const (
-	pollInterval                                = 15 * time.Second
+	brokersPollInterval                         = 15
+	brokersTTL                                  = 3 * brokersPollInterval // broker`s entry TTL. If TTL exceeded entries will be throw out from cache
+	listenFailTimeout                           = 5 * time.Second
+	applicationRunInterval                      = 15 * time.Second
+	brokerEntriesLifeTime                       = 30
 	sshConnectionDefaultTimeout                 = 5 * time.Second
 	providedApplicationConnectionDefaultTimeout = 5 * time.Second
 	defaultMaxBrokerDiscoveryResponseSize       = 16 * 1024 * 1024 // 16 megabytes max
@@ -56,301 +60,35 @@ func (a *atomicStatusData) IsStatusOK() bool {
 	return val == 1
 }
 
-func (a *atomicStatusData) StatusSet(isOK bool) {
+func (a *atomicStatusData) StatusSet(newState bool) {
 	var val int32
-	if isOK {
+	if newState {
 		val = 1
 	}
-
 	atomic.StoreInt32((*int32)(a), val)
+}
+
+func (a *atomicStatusData) StatusCheckAndSet(newState bool) bool {
+	var val, valOld int32
+	if newState {
+		val = 1
+	} else {
+		valOld = 1
+	}
+	return atomic.CompareAndSwapInt32((*int32)(a), valOld, val)
 }
 
 // generic atomic status subsystem interface. Can be used for SSH connection state
 // or for applications status signalling
 type subsystemStatus interface {
+	// atomically checks status
 	IsStatusOK() bool
+	// atomically sets status, but without garanties that state
+	// changed for false to true or otherwise
 	StatusSet(newState bool)
-}
-
-// PairConnItem struct stores info about paired connections
-// on registers or intent side
-type PairConnItem struct {
-	connPairIDX uint64
-
-	// paired connection logger
-	logger *log.Entry
-
-	// flag used for distinguish different connections
-	intentConnection bool
-
-	// interface to channel that uses current paired connection
-	// and new requests originator channel
-	// NOTE: this channels will be used for Connector <-> Connector
-	// interconnections
-	sshChannelIf   ssh.Channel
-	sshNewRequests <-chan *ssh.Request
-
-	// interface to local TCP connection. Based on intentConnection flag
-	// in will be either Incomming Intent connection or Outgoing local connection to
-	// provided registered application
-	localTcpConn net.Conn
-}
-
-// runtime SSH connection storage tank
-type sshConnectionRuntime struct {
-	brokerData *comm_app.BrokerInfoData
-
-	// SSH part of runtime data
-	sshConn         ssh.Conn
-	sshConnChannels <-chan ssh.NewChannel
-	sshConnRequests <-chan *ssh.Request
-	sshConnStatus   subsystemStatus
-
-	// application provide/intent negotiated status storage
-	appState subsystemStatus
-
-	// paired connections storage
-	pairConnLock sync.Mutex
-	pairedConns  map[uint64]*PairConnItem
-
-	// old connection that was not updated on last update event
-	// we must not shedule new pair connections on that connections
-	outdatedConn subsystemStatus
-
-	// broker registered AppID (defined by broker after provided/intent application advertising)
-	brokerAppID uuid.UUID
-}
-
-func (s *sshConnectionRuntime) RegisterPairConnection(pConn *PairConnItem) error {
-	s.pairConnLock.Lock()
-	defer s.pairConnLock.Unlock()
-
-	if pConn == nil {
-		return errors.New("Empty paired connection PTR")
-	}
-
-	// check if connection already exists
-	_, ok := s.pairedConns[pConn.connPairIDX]
-	if ok {
-		return fmt.Errorf("Paired connection with IDX: %d to %s already registered", pConn.connPairIDX, BrokerInfo(s))
-	}
-
-	// register connection
-	s.pairedConns[pConn.connPairIDX] = pConn
-
-	return nil
-}
-
-type PairedConnectionClearIf interface {
-	// deletes pair connection from SSH storage registration
-	DeletePairConnection(pConn *PairConnItem) error
-}
-
-func (s *sshConnectionRuntime) DeletePairConnection(pConn *PairConnItem) error {
-	s.pairConnLock.Lock()
-	defer s.pairConnLock.Unlock()
-
-	if pConn == nil {
-		return errors.New("Empty paired connection PTR")
-	}
-
-	// check if connection exists
-	_, ok := s.pairedConns[pConn.connPairIDX]
-	if !ok {
-		return fmt.Errorf("Paired connection with IDX: %d to %s doesn't registered", pConn.connPairIDX, BrokerInfo(s))
-	}
-
-	// clear connection
-	delete(s.pairedConns, pConn.connPairIDX)
-
-	return nil
-}
-
-// BrokerInfo outputs Broker connection data for logging system
-func BrokerInfo(sshRuntime *sshConnectionRuntime) string {
-	if sshRuntime == nil {
-		return "Broker: Unknown"
-	}
-
-	return fmt.Sprintf("Broker: %s (%s:%s)",
-		sshRuntime.brokerData.BrokerName,
-		sshRuntime.brokerData.BrokerIP.String(),
-		fmt.Sprintf("%d", sshRuntime.brokerData.BrokerPort))
-}
-
-// ApplicationSSHConnectionsStorage generic SSH connections storage
-type ApplicationSSHConnectionsStorage struct {
-	sshConnLock    sync.Mutex
-	sshConnectorIf BrokerConnectionIf
-	sshConnections map[string]*sshConnectionRuntime
-}
-
-// GetSuitableSSHConnectionsList returns suitable SSH connections list that ordered according to Broker scores
-func (a *ApplicationSSHConnectionsStorage) GetSuitableSSHConnectionsList() []*sshConnectionRuntime {
-	a.sshConnLock.Lock()
-	defer a.sshConnLock.Unlock()
-
-	// construct slice of suitable brokers
-	var brList []comm_app.BrokerInfoData
-	for _, sshConnPtr := range a.sshConnections {
-		// skip outdated connections or deleted
-		if sshConnPtr.outdatedConn.IsStatusOK() || !sshConnPtr.sshConnStatus.IsStatusOK() {
-			continue
-		}
-
-		brList = append(brList, *(sshConnPtr.brokerData))
-	}
-
-	// sort brokers
-	brList = BrokersListSort(brList)
-
-	// construct SSH connections list
-	var resultSSHConnList []*sshConnectionRuntime
-	for _, brIt := range brList {
-		sshConnPtr, ok := a.sshConnections[brIt.BrokerName]
-		if ok {
-			resultSSHConnList = append(resultSSHConnList, sshConnPtr)
-		}
-	}
-
-	return resultSSHConnList
-}
-
-// UpdateExistedConnectionsWithNewBrokers updates current SSH connections with Broker scores and establishes new connections
-// This info used for selection best SSH connections for paired session termination
-func (a *ApplicationSSHConnectionsStorage) UpdateExistedConnectionsWithNewBrokers(brokerList []comm_app.BrokerInfoData) []comm_app.BrokerInfoData {
-	a.sshConnLock.Lock()
-	defer a.sshConnLock.Unlock()
-
-	// define find Broker handler that will process ingress New Brokres slice and search requested broker
-	// if Broker found it will be deleted from slice and returned to invoker
-	findBroker := func(brokerName string, brokers *[]comm_app.BrokerInfoData) (comm_app.BrokerInfoData, bool) {
-		if len(brokerName) == 0 || brokers == nil {
-			return comm_app.BrokerInfoData{}, false
-		}
-
-		for idx, brokerIt := range *brokers {
-			if brokerName == brokerIt.BrokerName {
-				copy((*brokers)[idx:], (*brokers)[idx+1:])
-				// eliminate memory leak possibility
-				(*brokers)[len(*brokers)-1] = comm_app.BrokerInfoData{}
-				(*brokers) = (*brokers)[:len(*brokers)-1]
-
-				return brokerIt, true
-			}
-		}
-
-		return comm_app.BrokerInfoData{}, false
-	}
-
-	// set outdated flag on connections that not in new Brokers list and close it if there are no paired connections
-	for brokerName, brokerIt := range a.sshConnections {
-		brNewData, found := findBroker(brokerName, &brokerList)
-		if found {
-			// update existed connection to Broker with new scores and reset outdated flag
-			brokerIt.brokerData = &brNewData
-			brokerIt.outdatedConn.StatusSet(false)
-		} else {
-			// set outdated flag
-			brokerIt.outdatedConn.StatusSet(true)
-			// get connection lock and check if connection doesn't have a paired sessions
-			// if so then close SSH session
-			brokerIt.pairConnLock.Lock()
-			if len(a.sshConnections[brokerName].pairedConns) == 0 {
-				// close SSH session
-				brokerIt.sshConnStatus.StatusSet(false)
-
-				//				fmt.Printf("Close connection to %s\n", BrokerInfo(brokerIt))
-
-				brokerIt.sshConn.Close()
-			}
-			brokerIt.pairConnLock.Unlock()
-		}
-	}
-
-	return brokerList
-}
-
-// CheckIfSSHConnectionExists checks if SSH connection to desired Broker already registered
-func (a *ApplicationSSHConnectionsStorage) CheckIfSSHConnectionExists(brokerName string) bool {
-	a.sshConnLock.Lock()
-	defer a.sshConnLock.Unlock()
-
-	// check if connection already exists
-	_, ok := a.sshConnections[brokerName]
-	if ok {
-		return true
-	}
-
-	return false
-}
-
-// RegisterSSHConnection adds SSH connection into application connection storage
-func (a *ApplicationSSHConnectionsStorage) RegisterSSHConnection(sshConnData *sshConnectionRuntime) error {
-	a.sshConnLock.Lock()
-	defer a.sshConnLock.Unlock()
-
-	if sshConnData == nil {
-		return errors.New("Empty connection PTR")
-	}
-
-	// check if connection already exists
-	_, ok := a.sshConnections[sshConnData.brokerData.BrokerName]
-	if ok {
-		return fmt.Errorf("Connection to requested %s already registered", BrokerInfo(sshConnData))
-	}
-
-	// register connetion
-	a.sshConnections[sshConnData.brokerData.BrokerName] = sshConnData
-
-	return nil
-}
-
-// UnregisterSSHConnection deletes SSH connection from application connection storage
-func (a *ApplicationSSHConnectionsStorage) UnregisterSSHConnection(sshConnData *sshConnectionRuntime) error {
-	a.sshConnLock.Lock()
-	defer a.sshConnLock.Unlock()
-
-	if sshConnData == nil {
-		return errors.New("Empty connection PTR")
-	}
-
-	// check if connection exists
-	_, ok := a.sshConnections[sshConnData.brokerData.BrokerName]
-	if !ok {
-		return fmt.Errorf("Connection to requested %s doesn't registered for current application", BrokerInfo(sshConnData))
-	}
-
-	// clear connection
-	delete(a.sshConnections, sshConnData.brokerData.BrokerName)
-
-	return nil
-}
-
-type applicationItemData struct {
-	// application specific logger
-	logger *log.Entry
-
-	// app flag that selects application type
-	appIntentType bool
-
-	// application access token
-	accessToken string
-
-	// register app data part
-	appName    comm_app.StructuredApplicationName
-	appRegInfo comm_app.ApplicationRegisterInfo
-	connectTo  string
-
-	// intent app data part
-	sourceAppName      comm_app.StructuredApplicationName
-	sourceAppRegInfo   comm_app.ApplicationIntentInfo
-	destinationAppName comm_app.StructuredApplicationName
-	listenAt           string
-	listener           net.Listener
-
-	// Application SHH connections storage
-	appSSHStorage ApplicationSSHConnectionsStorage
+	// atomically sets status with garanties that state
+	// changed by current moment
+	StatusCheckAndSet(newState bool) bool
 }
 
 // BrokerDiscoveryData stores info about discovered brokers
@@ -409,17 +147,37 @@ type Connector struct {
 	// count of connections that must do each application to "best to connect" brokers
 	desiredConnectionsCount int
 	// storage contains "best to connect" Brokers list sorted by geo and load scores
-	availableBrokers []comm_app.BrokerInfoData
+	availableBrokers map[string]comm_app.BrokerInfoData
 	// storage contains "best to connect" to registered Application Brokers list. This Broker lists is subsets of availableBrokers
 	// key - fully qualified name of application gotten as comm_app.StructuredApplicationName.EncodeToString(), slice sorted by geo and load scores
-	availableApplicationsBrokers map[string][]comm_app.BrokerInfoData
+	availableApplicationsBrokers map[string]map[string]comm_app.BrokerInfoData
+	// stores received from ALB service public keys of brokers that must be checked by connector in SSH
+	// connection processing
+	brokerPublicKeysList map[string][]byte
+}
+
+// ConnectorDataIf implements methods for access to Connecotr mmetadata from applications
+type ConnectorDataIf interface {
+	// returns ConnecotrID registered on Brokers
+	GetConnectorID() uuid.UUID
+	// returns ALB enabled status
+	GetALBEnabledStatus() bool
+}
+
+func (c *Connector) GetALBEnabledStatus() bool {
+	return !c.staticBrokerMode
+}
+
+func (c *Connector) GetConnectorID() uuid.UUID {
+	c.connectorIDLock.Lock()
+	defer c.connectorIDLock.Unlock()
+
+	return c.connectorID
 }
 
 // BrokerConnectionIf implements interface for connector that supply intents/registers applications
 // with SSH connections to broker based on discovery data
 type BrokerConnectionIf interface {
-	// return new connection IDX
-	GetNewConnectionIDX() uint64
 	// GetBrokerList returns list of Brokers from cache
 	// function returns Broker list slice, desired connections per app and error code
 	GetBrokersList(desiredApp comm_app.StructuredApplicationName) ([]comm_app.BrokerInfoData, int, error)
@@ -427,6 +185,8 @@ type BrokerConnectionIf interface {
 	// function returns PTR on established SSH connection to requested broker where Connector_ID already registered
 	// connection ready to get requests
 	ConnectToBroker(brokerData comm_app.BrokerInfoData) (*sshConnectionRuntime, error)
+	// return new connection IDX
+	GetNewConnectionIDX() uint64
 	// adds broker into black list on defaultBlackListedBrokerAliveTime time from moment of adding
 	AddBrokerToBlackList(brokerData comm_app.BrokerInfoData) error
 	// filters broker list from black listed brokers
@@ -453,14 +213,26 @@ func ParseIPHostFromString(addrStr string) (string, uint16, error) {
 	return ip, uint16(portUint), nil
 }
 
-// GetConnectorID is implementation of ConnectorRegisterIf interface
 func (c *Connector) registerConnectorID(sshConn ssh.Conn) error {
 	c.connectorIDLock.Lock()
 	defer c.connectorIDLock.Unlock()
 
+	// get access token from value struct
+	accessToken, err := c.config.Frozy.AccessToken.Value()
+	if err != nil {
+		return fmt.Errorf("Failed to get access token value: %v", err)
+	}
+	if string(accessToken) == "" {
+		return errors.New("Access token is not configured in Frozy config section")
+	}
+
 	// fill connector metadata and serialize it
 	connRequest := &comm_app.JSONConnectorIDRegisterRequest{
 		ConnectorID: c.connectorID.String(),
+		AuthInfo: comm_app.ApplicationActionRequestAuthInfo{
+			AuthType:    comm_app.TrustUserAuthType,
+			AccessToken: string(accessToken),
+		},
 	}
 
 	// get some external info about connector and fill its struct if connector just started
@@ -593,6 +365,7 @@ func (c *Connector) GetBrokersList(desiredApp comm_app.StructuredApplicationName
 	defer c.brokersListLock.Unlock()
 
 	var desiredConnectionsCount int
+	var resultBrokerList []comm_app.BrokerInfoData
 
 	if c.desiredConnectionsCount > 0 {
 		desiredConnectionsCount = c.desiredConnectionsCount
@@ -603,20 +376,29 @@ func (c *Connector) GetBrokersList(desiredApp comm_app.StructuredApplicationName
 	if len(desiredApp.Name) > 0 {
 		encDesiredApp, err := desiredApp.EncodeToString()
 		if err != nil {
-			return nil, 0, fmt.Errorf("Can't encode application %s for use it as map key", desiredApp.ShortAppName())
+			return resultBrokerList, 0, fmt.Errorf("Can't encode application %s for use it as map key", desiredApp.ShortAppName())
 		}
 
 		brokersList, ok := c.availableApplicationsBrokers[encDesiredApp]
 		if ok {
-			resultBrokerList := append(brokersList[:0:0], brokersList...)
-			return resultBrokerList, desiredConnectionsCount, nil
+			// reload brokers from map
+			for _, brokerIt := range brokersList {
+				resultBrokerList = append(resultBrokerList, brokerIt)
+			}
 		} else {
-			return nil, 0, fmt.Errorf("Requested Brokers list for application %s doesn't exists", desiredApp.ShortAppName())
+			return resultBrokerList, 0, fmt.Errorf("Requested Brokers list for application %s doesn't exists", desiredApp.ShortAppName())
 		}
 	} else {
-		resultBrokerList := append(c.availableBrokers[:0:0], c.availableBrokers...)
-		return resultBrokerList, desiredConnectionsCount, nil
+		// reload brokers from map
+		for _, brokerIt := range c.availableBrokers {
+			resultBrokerList = append(resultBrokerList, brokerIt)
+		}
 	}
+
+	// sorting brokers list
+	resultBrokerList = BrokersListSort(resultBrokerList)
+
+	return resultBrokerList, desiredConnectionsCount, nil
 }
 
 // ConnectToBroker implemets method of BrokerConnectionIf interface
@@ -632,6 +414,11 @@ func (c *Connector) ConnectToBroker(brokerData comm_app.BrokerInfoData) (*sshCon
 		Port: brokerData.BrokerPort,
 	}
 
+	// register Brokers public key in storage
+	c.brokersListLock.Lock()
+	c.brokerPublicKeysList[brokerConnectionData.String()] = brokerData.BrokerPublicKey
+	c.brokersListLock.Unlock()
+
 	//	fmt.Printf("Try to dial to %s with timeout %d\n", brokerConnectionData.String(), c.sshCfg.Timeout)
 
 	// create network connection
@@ -644,11 +431,8 @@ func (c *Connector) ConnectToBroker(brokerData comm_app.BrokerInfoData) (*sshCon
 
 	// create SSH client connection
 	sshConnData := &sshConnectionRuntime{
-		brokerData:    &brokerData,
-		pairedConns:   make(map[uint64]*PairConnItem),
-		sshConnStatus: new(atomicStatusData),
-		appState:      new(atomicStatusData),
-		outdatedConn:  new(atomicStatusData),
+		brokerData:  &brokerData,
+		pairedConns: make(map[uint64]*PairConnItem),
 	}
 
 	// set I/O deadline
@@ -687,7 +471,7 @@ func (c *Connector) ConnectToBroker(brokerData comm_app.BrokerInfoData) (*sshCon
 var globalConnector *Connector
 
 // Execute the connector
-func Execute(optionalConfig string) error {
+func Execute(optionalConfig config.ConnectorCmdLineArgs) error {
 	// create new connector instance
 	if globalConnector == nil {
 		globalConnector = new(Connector)
@@ -697,7 +481,9 @@ func Execute(optionalConfig string) error {
 
 		// create map inside connector
 		globalConnector.brokersBlackList = make(map[string]BlackListedBrokerData)
-		globalConnector.availableApplicationsBrokers = make(map[string][]comm_app.BrokerInfoData)
+		globalConnector.availableBrokers = make(map[string]comm_app.BrokerInfoData)
+		globalConnector.availableApplicationsBrokers = make(map[string]map[string]comm_app.BrokerInfoData)
+		globalConnector.brokerPublicKeysList = make(map[string][]byte)
 	}
 
 	// load config from file and environmet variables
@@ -737,7 +523,8 @@ func Execute(optionalConfig string) error {
 	}
 
 	// check what mode connector must use and run system
-	if reflect.DeepEqual(&globalConnector.config.Frozy.BrokerDiscovery, &config.URLConfig{}) {
+	// NOTE: Broker single mode works only if user manually configure Static Broker section
+	if !reflect.DeepEqual(&globalConnector.config.Frozy.BrokerStatic, &config.Endpoint{}) {
 		globalConnector.staticBrokerMode = true
 
 		brHost, err := globalConnector.config.Frozy.BrokerAddr()
@@ -766,13 +553,13 @@ func Execute(optionalConfig string) error {
 		}
 
 		// fill available brokers list
-		globalConnector.availableBrokers = append(globalConnector.availableBrokers, comm_app.BrokerInfoData{
+		globalConnector.availableBrokers["SingleBroker"] = comm_app.BrokerInfoData{
 			BrokerName:      "SingleBroker",
 			BrokerIP:        ipAddr,
 			BrokerPort:      brHost.Port,
 			BrokerGeoScore:  1,
 			BrokerLoadScore: 1,
-		})
+		}
 	}
 
 	return globalConnector.run()
@@ -840,9 +627,11 @@ func (c *Connector) ParseConnectorApplications() error {
 
 		// create provider application runtime
 		c.applications = append(c.applications, &applicationItemData{
-			logger:      regLogger,
-			accessToken: string(accessToken),
-			appName:     appStructName,
+			emergencyStopChannel: make(chan bool, 1),
+			connMetaData:         ConnectorDataIf(c),
+			logger:               regLogger,
+			accessToken:          string(accessToken),
+			appName:              appStructName,
 			appRegInfo: comm_app.ApplicationRegisterInfo{
 				Host: provAppVal.Host,
 				Port: provAppVal.Port,
@@ -886,10 +675,12 @@ func (c *Connector) ParseConnectorApplications() error {
 
 		// create provider application runtime
 		c.applications = append(c.applications, &applicationItemData{
-			appIntentType: true,
-			logger:        intLogger,
-			accessToken:   string(accessToken),
-			sourceAppName: srcAppStructName,
+			emergencyStopChannel: make(chan bool, 1),
+			connMetaData:         ConnectorDataIf(c),
+			appIntentType:        true,
+			logger:               intLogger,
+			accessToken:          string(accessToken),
+			sourceAppName:        srcAppStructName,
 			sourceAppRegInfo: comm_app.ApplicationIntentInfo{
 				Port: consAppVal.Port,
 			},
@@ -905,6 +696,27 @@ func (c *Connector) ParseConnectorApplications() error {
 	return nil
 }
 
+func (c Connector) serverKeyCheckCallback(connStr string, remoteAddr net.Addr, publicKey ssh.PublicKey) error {
+	c.brokersListLock.Lock()
+	defer c.brokersListLock.Unlock()
+
+	// trying to get registered public key for current Broker
+	brPubKey, ok := c.brokerPublicKeysList[connStr]
+	if !ok {
+		c.logger.Warnf("Public key for Broker host %s isn't registered", connStr)
+		return fmt.Errorf("Public key for Broker host %s isn't registered", connStr)
+	}
+
+	srvPubKey := publicKey.Marshal()
+
+	if !reflect.DeepEqual(&brPubKey, &srvPubKey) {
+		c.logger.Warnf("Public key for Broker host %s is invalid", connStr)
+		return fmt.Errorf("Public key for Broker host %s is invalid", connStr)
+	}
+
+	return nil
+}
+
 func (c Connector) sshClientConfig() (*ssh.ClientConfig, error) {
 	signer, err := ssh.NewSignerFromKey(c.rsaKey)
 	if err != nil {
@@ -912,8 +724,8 @@ func (c Connector) sshClientConfig() (*ssh.ClientConfig, error) {
 	}
 
 	return &ssh.ClientConfig{
+		HostKeyCallback: c.serverKeyCheckCallback,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         sshConnectionDefaultTimeout,
 	}, nil
 }
@@ -1098,65 +910,50 @@ func (c *Connector) brokerListUpdate(brokersAll []comm_app.BrokerInfoData, broke
 	c.brokersListLock.Lock()
 	defer c.brokersListLock.Unlock()
 
-	// just reload containers
-	c.availableBrokers = brokersAll
+	// do reload generic brokers into cache
+	for _, brokerIt := range brokersAll {
+		// set Broker TTL
+		brokerIt.BrokerTTL = time.Now().UTC().Add(time.Duration(brokersTTL) * time.Second)
+		c.availableBrokers[brokerIt.BrokerName] = brokerIt
+	}
 
-	// just reload Brokers founded for applications
-	c.availableApplicationsBrokers = brokersApps
+	// check if there entries with exceeded TTL
+	timeNow := time.Now().UTC()
+	for brokerNameIt, brokerIt := range c.availableBrokers {
+		if timeNow.Sub(brokerIt.BrokerTTL) > 0 {
+			c.logger.Debugf("Delete aged broker %s from negotiated list of brokers", brokerNameIt)
 
-	//	// create temporary broker`s container
-	//	// here we will insert brokers for availableBrokers list
-	//	brokTmpStorage = make(map[string]BrokerInfoData)
-	//
-	//	// by default we will store all brokers for applications and pickup by one best broker from each application into general availableBrokers list
-	//	// if Brokers quality in availableBrokers doesn't exceed desiredConnectionsCount we add some brokers from sorted brokersAll list and will do reorder Brokers
-	//	// in availableBrokers list
-	//
-	//	// insert discovered by apps brokers into storage
-	//	for _, brMapIt := range brokersApps {
-	//		// some sanity checks here
-	//		err := c.sanityCheckFoundedBroker(brMapIt)
-	//		if err != nil {
-	//			fmt.Printf("Discovered Brokers discarded to process due to: %v, skip it\n", err)
-	//			continue
-	//		}
-	//
-	//		// insert best broker from each application into general slice
-	//		// Brokers may be the same for different applications
-	//		if len(brMapIt) > 0 {
-	//			brokTmpStorage[brMapIt[0].BrokerName] = brMapIt[0]
-	//		}
-	//	}
-	//
-	//	// append best Brokers up to limit and reorder slice
-	//	brokerDiff := c.desiredConnectionsCount - len(c.availableBrokers)
-	//	if brokerDiff > 0 {
-	//		// some sanity checks here
-	//		err := c.sanityCheckFoundedBroker(brokersAll)
-	//		if err != nil {
-	//			fmt.Printf("Discovered Brokers discarded to process due to: %v, skip it\n", err)
-	//		} else {
-	//			for _, brIt := range brokersAll {
-	//				brItem, ok := brokTmpStorage[brIt.BrokerName]
-	//				if !ok {
-	//					brokTmpStorage[brIt.BrokerName] = brIt
-	//					brokerDiff--
-	//
-	//					if brokerDiff <= 0 {
-	//						break
-	//					}
-	//				}
-	//			}
-	//		}
-	//	}
-	//
-	//	// now, reload brokers into availableBrokers
-	//	for _, brIt := range brokTmpStorage {
-	//		c.availableBrokers = append(c.availableBrokers, brIt)
-	//	}
-	//
-	//	// reorder final Brokers container
-	//	c.availableBrokers = c.BrokersListSort(c.availableBrokers)
+			// delete aged broker from list
+			delete(c.availableBrokers, brokerNameIt)
+		}
+	}
+
+	// do reload application specific brokers into cache
+	for appNameIt, brokerAppsIt := range brokersApps {
+		// check if map is empty
+		if c.availableApplicationsBrokers[appNameIt] == nil {
+			c.availableApplicationsBrokers[appNameIt] = make(map[string]comm_app.BrokerInfoData)
+		}
+
+		for _, brokerIt := range brokerAppsIt {
+			// set Broker TTL
+			brokerIt.BrokerTTL = time.Now().UTC().Add(time.Duration(brokersTTL) * time.Second)
+			c.availableApplicationsBrokers[appNameIt][brokerIt.BrokerName] = brokerIt
+		}
+	}
+
+	// check if there entries with exceeded TTL
+	timeNow = time.Now().UTC()
+	for appNameIt, brokerAppsIt := range c.availableApplicationsBrokers {
+		for brokerNameIt, brokerIt := range brokerAppsIt {
+			if timeNow.Sub(brokerIt.BrokerTTL) > 0 {
+				c.logger.Debugf("Delete aged broker %s from negotiated list of brokers", brokerNameIt)
+
+				// delete aged broker from list
+				delete(c.availableApplicationsBrokers[appNameIt], brokerNameIt)
+			}
+		}
+	}
 }
 
 // API gets list of applications that set as destinations in list of registered Intents
@@ -1205,43 +1002,37 @@ func (c *Connector) brokerDiscoveryThread() {
 	c.logger.Debug("Broker discovery thread started")
 
 	// first timeout inited to 1 ns. We must discovery brokers at startup
-	timeoutDiscovery := time.After(time.Nanosecond)
+	timeoutDiscovery := time.After(time.Millisecond)
 	timeoutBlackList := time.After(time.Second)
 
 	for {
 		select {
 		case <-timeoutDiscovery:
 			// rearm timeout to next broker discovery
-			timeoutDiscovery = time.After(pollInterval)
+			timeoutDiscovery = time.After(time.Duration(brokersPollInterval) * time.Second)
 
 			if c.staticBrokerMode {
 				continue
 			}
 
 			// update all Brokers list
-			genericBrokerDiscoveryError := false
 			brokersAll, err := c.brokerDiscovery(comm_app.StructuredApplicationName{}, "")
 			if err != nil {
 				c.logger.Warnf("Can't complete generic Broker discovery process due to: %v. Next try after some time interval", err)
-				genericBrokerDiscoveryError = true
 			} else {
 				err = c.sanityCheckFoundedBroker(brokersAll)
 				if err != nil {
 					c.logger.Warnf("Discovered Brokers discarded to process due to: %v, skip it", err)
-					genericBrokerDiscoveryError = true
-				} else {
-					// sorting all brokers list
-					brokersAll = BrokersListSort(brokersAll)
 				}
 			}
 
+			// NOTE: we doesn't sort brokers here. This operation will be done later when brokers will be upload from cache
+
 			// construct desired applications Broker`s list
-			appBrokerDiscoveryError := false
 			appBrList := make(map[string][]comm_app.BrokerInfoData)
 			appList, err := c.getIntentsDstAppsList()
 			if err != nil {
 				c.logger.Warnf("Discovered App Brokers discarded to process due to: %v, skip it", err)
-				appBrokerDiscoveryError = true
 			} else {
 				for appName, appAccToken := range appList {
 					structAppName, err := comm_app.DecodeApplicationString(comm_app.ApplicationNameString(appName))
@@ -1264,18 +1055,14 @@ func (c *Connector) brokerDiscoveryThread() {
 							continue
 						}
 
-						// sorting app brokers list
-						brokersApp = BrokersListSort(brokersApp)
 						// and store it into map
 						appBrList[appName] = brokersApp
 					}
 				}
 			}
 
-			if !genericBrokerDiscoveryError && !appBrokerDiscoveryError {
-				// do Brokers search results postprocessing
-				c.brokerListUpdate(brokersAll, appBrList)
-			}
+			// do Brokers search results postprocessing
+			c.brokerListUpdate(brokersAll, appBrList)
 
 		case <-timeoutBlackList:
 			// delete aged Brokers from list and allow to connect to them
