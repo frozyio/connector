@@ -282,9 +282,9 @@ func (a *ApplicationSSHConnectionsStorage) DropAllSSHConnections() {
 	a.sshConnLock.Lock()
 	defer a.sshConnLock.Unlock()
 
-	for brName, sshConnIt := range a.sshConnections {
+	for _, sshConnIt := range a.sshConnections {
+		// just close SSH connections all unregistration work will do their own handlers
 		sshConnIt.sshConn.Close()
-		delete(a.sshConnections, brName)
 	}
 }
 
