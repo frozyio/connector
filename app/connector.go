@@ -641,8 +641,11 @@ func (c *Connector) ParseConnectorApplications() error {
 		if len(consAppVal.SrcName) == 0 || len(consAppVal.DstName) == 0 {
 			return errors.New("Empty source or destination name detected in consumed application configuration")
 		}
+		if len(consAppVal.Host) == 0 {
+			return fmt.Errorf("Empty host detected in config of consumed application src:%s, dst: %s", consAppVal.SrcName, consAppVal.DstName)
+		}
 		if consAppVal.Port == 0 {
-			return fmt.Errorf("Empty port or access token detected in config of consumed application src:%s, dst: %s", consAppVal.SrcName, consAppVal.DstName)
+			return fmt.Errorf("Empty port detected in config of consumed application src:%s, dst: %s", consAppVal.SrcName, consAppVal.DstName)
 		}
 		// ok, lets try to check application names
 		srcAppStructName, err := comm_app.DecodeApplicationString(comm_app.ApplicationNameString(consAppVal.SrcName))
@@ -659,6 +662,7 @@ func (c *Connector) ParseConnectorApplications() error {
 			"intent_src_app_owner": srcAppStructName.Owner,
 			"intent_dst_app_name":  dstAppStructName.ShortAppName(),
 			"intent_dst_app_owner": dstAppStructName.Owner,
+			"intent_app_host":      consAppVal.Host,
 			"intent_app_port":      consAppVal.Port,
 		})
 
@@ -671,10 +675,11 @@ func (c *Connector) ParseConnectorApplications() error {
 			accessToken:          string(accessToken),
 			sourceAppName:        srcAppStructName,
 			sourceAppRegInfo: comm_app.ApplicationIntentInfo{
+				Host: consAppVal.Host,
 				Port: consAppVal.Port,
 			},
 			destinationAppName: dstAppStructName,
-			listenAt:           fmt.Sprintf("0.0.0.0:%d", consAppVal.Port),
+			listenAt:           fmt.Sprintf("%s:%d", consAppVal.Host, consAppVal.Port),
 			appSSHStorage: ApplicationSSHConnectionsStorage{
 				sshConnectorIf: BrokerConnectionIf(c),
 				sshConnections: make(map[string]*sshConnectionRuntime),

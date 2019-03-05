@@ -280,6 +280,7 @@ type ApplicationRegisterInfo struct {
 // NOTE: As workaround for case when consumer will listen at same port as returned provide
 // application info (in JSONBrokerToConsumerReply) we may use port = 0 in this structure
 type ApplicationIntentInfo struct {
+	Host string `json:"host"`
 	Port uint16 `json:"port"`
 }
 

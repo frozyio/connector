@@ -46,6 +46,7 @@ type ProvideAppInfo struct {
 type IntentAppInfo struct {
 	SrcName string `mapstructure:"src_name" json:"src_name" yaml:"src_name"`
 	DstName string `mapstructure:"dst_name" json:"dst_name" yaml:"dst_name"`
+	Host    string `mapstructure:"host" json:"host" yaml:"host"`
 	Port    uint16 `mapstructure:"port" json:"port" yaml:"port"`
 }
 

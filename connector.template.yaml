@@ -34,6 +34,7 @@ applications:
 intents:
   - src_name: "web-backend"
     dst_name: "sql-backend.self.user-domain.sergey-afrozy-dio"
+    host: localhost
     port: 5555
 
 # "log" section configures connector logging.

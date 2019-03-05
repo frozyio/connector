@@ -32,6 +32,7 @@ intent could be like that:
 		intents:.
 			- src_name: "web-backend"
 			  dst_name: "sql-backend.self.user-domain.sergey-afrozy-dio"
+			  host: 127.0.0.1
 			  port: 5555..
 
 		log:
