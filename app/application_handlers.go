@@ -507,7 +507,7 @@ func (a *applicationItemData) connectToBroker(brokerIt comm_app.BrokerInfoData, 
 	}
 
 	a.logger.Debugf("Trying to setup SSH connectionto to %s",
-		fmt.Sprintf("Broker: %s (%s:%d)", brokerIt.BrokerName, brokerIt.BrokerIP.String(), brokerIt.BrokerPort))
+		fmt.Sprintf("Broker: %s (%s:%d). Broker PubKey: %v", brokerIt.BrokerName, brokerIt.BrokerIP.String(), brokerIt.BrokerPort, brokerIt.BrokerPublicKey))
 
 	// connect to Broker
 	sshRuntime, err := a.appSSHStorage.sshConnectorIf.ConnectToBroker(brokerIt)

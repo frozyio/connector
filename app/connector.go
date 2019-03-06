@@ -91,17 +91,6 @@ type subsystemStatus interface {
 	StatusCheckAndSet(newState bool) bool
 }
 
-// BrokerDiscoveryData stores info about discovered brokers
-type BrokerDiscoveryData struct {
-	BrokerName      string
-	BrokerID        uuid.UUID
-	BrokerConnData  config.Endpoint
-	BrokerGeoScore  uint
-	BrokerLoadScore uint
-	BrokerIP        net.IP
-	BrokerPort      uint16
-}
-
 // BlackListedBrokerData stores data about temporary disabled brokers on connector
 type BlackListedBrokerData struct {
 	brokerData      comm_app.BrokerInfoData
