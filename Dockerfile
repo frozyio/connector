@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.12beta2 AS build-env
+FROM golang:1.12.0 AS build-env
 ENV GO111MODULE=on
 ARG GOPROXY
 ENV GOPROXY=$GOPROXY

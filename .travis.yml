@@ -1,6 +1,6 @@
 language: go
 go:
-- 1.12beta2
+- 1.12.0
 env:
 - GO111MODULE=on
 addons:
