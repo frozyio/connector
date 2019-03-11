@@ -641,9 +641,6 @@ func (c *Connector) ParseConnectorApplications() error {
 		if len(consAppVal.SrcName) == 0 || len(consAppVal.DstName) == 0 {
 			return errors.New("Empty source or destination name detected in consumed application configuration")
 		}
-		if len(consAppVal.Host) == 0 {
-			return fmt.Errorf("Empty host detected in config of consumed application src:%s, dst: %s", consAppVal.SrcName, consAppVal.DstName)
-		}
 		if consAppVal.Port == 0 {
 			return fmt.Errorf("Empty port detected in config of consumed application src:%s, dst: %s", consAppVal.SrcName, consAppVal.DstName)
 		}
