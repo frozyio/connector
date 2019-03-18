@@ -80,7 +80,9 @@ Available environment (configuration) variables are:
   * ```FROZY_ACCESS_TOKEN``` (```frozy.access_token```) - Access token to use
     for registration API and application owner authentication.
 
-    Default: none (user must put access_token into configuration)
+    Default: none (user must put access_token into configuration). 
+
+    STDIN mode possible, place 'STDIN' or 'stdin' instead or token value and it will be requested at startup.
 
 Additional environment (configuration) variables for registrations/intents applications:
 

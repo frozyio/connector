@@ -8,11 +8,13 @@ import (
 	"path"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	yaml "gopkg.in/yaml.v2"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const (
@@ -265,6 +267,19 @@ func (c *Config) Load(optionalConfig ConnectorCmdLineArgs) {
 		c.Frozy.Insecure = true
 	} else if optionalConfig.Insecure == "false" {
 		c.Frozy.Insecure = false
+	}
+
+	// handle stdin mode
+        accessToken, err := c.Frozy.AccessToken.Value()
+	if err == nil && (string(accessToken) == "STDIN" || string(accessToken) == "stdin") {
+		fmt.Print("You are in STDIN Access Token mode. Please enter token value (characters are hidden): ")
+		accessToken, err := terminal.ReadPassword(int(syscall.Stdin))
+		if err == nil {
+			fmt.Print("\nToken entered, go ahead.\n")
+			c.Frozy.AccessToken.resolvedValue = accessToken
+		} else {
+			fmt.Print("\nSTDIN aborted or incorrect input: ", err)
+		}
 	}
 }
 
